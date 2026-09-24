@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SatusBlockchain.Node/SatusBlockchain.Node.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SatusBlockchain.Node.Tests/SatusBlockchain.Node.Tests.csproj" />
+  </Folder>
+</Solution>
