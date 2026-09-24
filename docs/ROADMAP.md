@@ -9,7 +9,7 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 |---|-------|---------|----------------------------------|--------|
 | 0 | Fundação | Solution, projetos (nó + testes), `docs/*.md` v1 | — | ✅ |
 | 1 | Bloco e hash | `Block`, `Transaction`, `Hasher` (SHA-256), testes | Imutabilidade, integridade, fingerprint criptográfico | ✅ |
-| 2 | Cadeia e genesis | `Blockchain`, genesis block, `IsValid()`, testes | Encadeamento, detecção de adulteração, base do estado replicado | ⬜ |
+| 2 | Cadeia e genesis | `Blockchain`, genesis block, `IsValid()`, testes | Encadeamento, detecção de adulteração, base do estado replicado | ✅ |
 | 3 | Proof of Work | `ProofOfWork`, dificuldade configurável, testes | Custo computacional, resistência à reescrita do histórico | ⬜ |
 | 4 | API REST (nó único) | Endpoints: chain, transactions, mine (sem peers) | Nó como serviço autônomo, contrato de comunicação | ⬜ |
 | 5 | Docker + Compose | Dockerfile, compose com 3 nós isolados | Processos independentes, redes, configuração por ambiente | ⬜ |
