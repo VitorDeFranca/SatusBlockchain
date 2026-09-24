@@ -49,7 +49,7 @@ SatusBlockchain/
 ├── tests/
 │   └── SatusBlockchain.Node.Tests/
 ├── docker-compose.yml         # (etapa 5)
-├── SatusBlockchain.slnx
+├── SatusBlockchain.sln
 └── README.md
 ```
 
