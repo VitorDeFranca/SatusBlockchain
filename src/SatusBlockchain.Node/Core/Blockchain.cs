@@ -123,6 +123,7 @@ public class Blockchain
 
         // Recalcular o hash e comparar com o armazenado detecta qualquer
         // alteração no conteúdo do bloco (adulteração).
-        return block.Hash == Hasher.ComputeHash(block);
+        var recalculatedHash = Hasher.ComputeHash(block);
+        return block.Hash == recalculatedHash;
     }
 }
