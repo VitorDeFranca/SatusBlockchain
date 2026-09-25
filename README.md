@@ -22,13 +22,47 @@ src/SatusBlockchain.Node/          # nó da blockchain (ASP.NET Core)
 tests/SatusBlockchain.Node.Tests/  # testes unitários (xUnit)
 ```
 
-## Como executar (por enquanto — nó único, sem blockchain ainda)
+## Como executar (nó único)
 
-```bash
+```powershell
 dotnet build
 dotnet test
+
+# sobe o nó (NODE_ID e DIFFICULTY são opcionais)
+$env:NODE_ID = "node1"
+$env:DIFFICULTY = "4"      # zeros hexadecimais do PoW; padrão 4 (~1s por bloco)
 dotnet run --project src/SatusBlockchain.Node
 ```
 
-O roadmap completo (incluindo `docker compose up` com 3 nós) está em
-[docs/ROADMAP.md](docs/ROADMAP.md).
+### Uso da API
+
+```powershell
+# situação do nó
+curl http://localhost:5000/
+
+# criar transações (vão para a mempool)
+curl -X POST http://localhost:5000/transactions `
+  -H "Content-Type: application/json" `
+  -d '{"from":"alice","to":"bob","amount":10}'
+
+curl http://localhost:5000/transactions/pending
+
+# minerar um bloco com as transações pendentes (~1s)
+curl -X POST http://localhost:5000/blocks/mine
+
+# conferir a cadeia
+curl http://localhost:5000/chain
+curl http://localhost:5000/chain/validate
+```
+
+| Endpoint | Descrição |
+|----------|-----------|
+| `GET /` | Identidade, dificuldade, tamanho e validade da cadeia |
+| `GET /chain` | Cadeia completa do nó |
+| `GET /chain/validate` | Valida encadeamento, hashes e Proof of Work |
+| `POST /transactions` | Adiciona transação à mempool |
+| `GET /transactions/pending` | Transações aguardando mineração |
+| `POST /blocks/mine` | Minera um bloco com a mempool |
+
+O roadmap completo (incluindo Docker Compose com 3 nós, propagação e consenso)
+está em [docs/ROADMAP.md](docs/ROADMAP.md).

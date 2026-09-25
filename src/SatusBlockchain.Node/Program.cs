@@ -1,10 +1,30 @@
+using SatusBlockchain.Node;
+using SatusBlockchain.Node.Api;
+using SatusBlockchain.Node.Core;
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Configuração do nó (NODE_ID, DIFFICULTY), validada na inicialização.
+var nodeOptions = NodeOptions.FromConfiguration(builder.Configuration);
+
+// Estado do nó: instâncias únicas em memória (o estado replicado de cada nó).
+builder.Services.AddSingleton(nodeOptions);
+builder.Services.AddSingleton<Blockchain>();
+builder.Services.AddSingleton<Mempool>();
+
 var app = builder.Build();
 
-// Etapa 0 (Fundação): apenas um endpoint de identificação do nó.
-// Os endpoints da blockchain serão adicionados incrementalmente (ver docs/ROADMAP.md).
-var nodeId = builder.Configuration["NODE_ID"] ?? "node-local";
+// Identidade e situação do nó — útil para conferir a demo.
+app.MapGet("/", (NodeOptions node, Blockchain blockchain) => Results.Ok(new
+{
+    node = node.NodeId,
+    difficulty = node.Difficulty,
+    blocks = blockchain.Length,
+    valid = blockchain.IsValid()
+}));
 
-app.MapGet("/", () => Results.Ok(new { node = nodeId, status = "running" }));
+app.MapChainEndpoints();
+app.MapTransactionEndpoints();
+app.MapBlockEndpoints();
 
 app.Run();
