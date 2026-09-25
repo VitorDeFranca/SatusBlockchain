@@ -23,9 +23,15 @@ public class Blockchain
     private readonly List<Block> _chain = [];
     private readonly Lock _lock = new();
 
-    public Blockchain()
+    /// <summary>Dificuldade do Proof of Work usada por este nó.</summary>
+    public byte Difficulty { get; }
+
+    public Blockchain(byte difficulty = ProofOfWork.DefaultDifficulty)
     {
-        _chain.Add(CreateGenesisBlock());
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(difficulty, ProofOfWork.MaxDifficulty);
+
+        Difficulty = difficulty;
+        _chain.Add(CreateGenesisBlock(difficulty));
     }
 
     public int Length
@@ -58,14 +64,48 @@ public class Blockchain
     public bool AddBlock(Block block)
     {
         lock (_lock)
-        {
-            var previousHash = _chain[^1].Hash;
-            if (!IsValidBlock(block, expectedIndex: _chain.Count, expectedPreviousHash: previousHash))
-                return false;
+            return TryAppend(block);
+    }
 
-            _chain.Add(block);
-            return true;
+    /// <summary>
+    /// Minera um novo bloco com as transações informadas e tenta anexá-lo à cadeia.
+    ///
+    /// Ponto importante de concorrência: a mineração (lenta, ~1s) roda FORA do lock,
+    /// para não bloquear as demais requisições do nó. Depois de minerar, o bloco é
+    /// revalidado sob o lock — se outro bloco já tiver entrado na cadeia nesse
+    /// intervalo, a mineração é descartada (retorna null) e o chamador pode repetir.
+    /// </summary>
+    public Block? MineBlock(IReadOnlyList<Transaction> transactions)
+    {
+        Block candidate;
+        lock (_lock)
+        {
+            var previous = _chain[^1];
+            candidate = new Block
+            {
+                Index = previous.Index + 1,
+                Timestamp = DateTimeOffset.UtcNow,
+                Transactions = [.. transactions],
+                PreviousHash = previous.Hash
+            };
         }
+
+        // Mineração FORA do lock: pode levar segundos.
+        ProofOfWork.Mine(candidate, Difficulty);
+
+        lock (_lock)
+            return TryAppend(candidate) ? candidate : null;
+    }
+
+    /// <summary>Exige o lock adquirido. Encadeia e anexa o bloco, se válido.</summary>
+    private bool TryAppend(Block block)
+    {
+        if (!IsValidBlock(block, expectedIndex: _chain.Count,
+                expectedPreviousHash: _chain[^1].Hash, Difficulty))
+            return false;
+
+        _chain.Add(block);
+        return true;
     }
 
     /// <summary>
@@ -86,7 +126,8 @@ public class Blockchain
                     ? GenesisPreviousHash
                     : _chain[position - 1].Hash;
 
-                if (!IsValidBlock(_chain[position], expectedIndex: position, expectedPreviousHash))
+                if (!IsValidBlock(_chain[position], expectedIndex: position,
+                        expectedPreviousHash, Difficulty))
                     return false;
             }
 
@@ -94,26 +135,28 @@ public class Blockchain
         }
     }
 
-    public static Block CreateGenesisBlock()
+    public static Block CreateGenesisBlock(byte difficulty = ProofOfWork.DefaultDifficulty)
     {
         var block = new Block
         {
             Index = 0,
             Timestamp = GenesisTimestamp,
             Transactions = [],
-            PreviousHash = GenesisPreviousHash,
-            Nonce = 0
+            PreviousHash = GenesisPreviousHash
         };
 
-        block.Hash = Hasher.ComputeHash(block);
+        // O genesis também passa pelo Proof of Work (como no Bitcoin).
+        // Como o timestamp é fixo, todos os nós obtêm exatamente o mesmo genesis.
+        ProofOfWork.Mine(block, difficulty);
         return block;
     }
 
     /// <summary>
-    /// Regras de aceitação de um bloco. A verificação do Proof of Work
-    /// entra aqui na etapa 3.
+    /// Regras de aceitação de um bloco: índice, elo, integridade do hash
+    /// e solução válida do Proof of Work.
     /// </summary>
-    private static bool IsValidBlock(Block block, int expectedIndex, string expectedPreviousHash)
+    private static bool IsValidBlock(Block block, int expectedIndex,
+        string expectedPreviousHash, byte difficulty)
     {
         if (block.Index != expectedIndex)
             return false;
@@ -124,6 +167,10 @@ public class Blockchain
         // Recalcular o hash e comparar com o armazenado detecta qualquer
         // alteração no conteúdo do bloco (adulteração).
         var recalculatedHash = Hasher.ComputeHash(block);
-        return block.Hash == recalculatedHash;
+        if (block.Hash != recalculatedHash)
+            return false;
+
+        // O bloco precisa ter um Proof of Work válido para a dificuldade do nó.
+        return ProofOfWork.SatisfiesDifficulty(block.Hash, difficulty);
     }
 }
