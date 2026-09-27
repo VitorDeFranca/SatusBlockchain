@@ -20,7 +20,9 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 
 ## Notas de ordenação
 
-- Testes unitários acompanham as etapas 1–3 (não são uma etapa separada).
+- Testes acompanham as etapas 1–4 (não são etapa separada): **unidade** para o domínio
+  (etapas 1–3) e **integração HTTP** para a API (etapa 4), subindo o nó real em um
+  processo isolado, em porta livre.
 - A API (etapa 4) vem antes do Docker (etapa 5): depurar um nó via `dotnet run`
   é muito mais rápido que dentro de container.
 - O desacoplamento push (etapa 6) / pull (etapa 7) permite demonstrar primeiro a

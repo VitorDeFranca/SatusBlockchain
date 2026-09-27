@@ -19,20 +19,32 @@ execução local com Docker Compose.
 
 ```
 src/SatusBlockchain.Node/          # nó da blockchain (ASP.NET Core)
-tests/SatusBlockchain.Node.Tests/  # testes unitários (xUnit)
+tests/SatusBlockchain.Node.Tests/  # testes de unidade (domínio) e de integração (API)
 ```
 
 ## Como executar (nó único)
 
 ```powershell
 dotnet build
-dotnet test
+dotnet test                                          # unidade + integração (~25s)
+
+# atalhos
+dotnet test --filter "FullyQualifiedName!~ApiTests"  # só unidade (segundos)
+dotnet test --filter "FullyQualifiedName~ApiTests"   # só integração da API
 
 # sobe o nó (NODE_ID e DIFFICULTY são opcionais)
 $env:NODE_ID = "node1"
 $env:DIFFICULTY = "4"      # zeros hexadecimais do PoW; padrão 4 (~1s por bloco)
 dotnet run --project src/SatusBlockchain.Node
 ```
+
+### Testes
+
+- **Unidade** (`Core/*Tests.cs`): `Block`, `Hasher`, `ProofOfWork`, `Blockchain`,
+  `Mempool`, `NodeOptions`. Determinísticos e instantâneos.
+- **Integração** (`Api/ApiTests.cs`): sobe o executável do nó em uma porta livre e
+  conversa por HTTP — valida rotas, status codes, JSON, `NODE_ID`/`DIFFICULTY` do
+  ambiente e o fluxo mempool → bloco. Um processo novo por teste (isolamento total).
 
 ### Uso da API
 
