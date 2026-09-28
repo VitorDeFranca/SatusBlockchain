@@ -14,23 +14,24 @@ execução local com Docker Compose.
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — requisitos e limites do projeto
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — arquitetura e decisões técnicas
 - [docs/ROADMAP.md](docs/ROADMAP.md) — etapas incrementais e status
+- [postman/README.md](postman/README.md) — roteiro de teste manual da API no Postman
 
 ## Estrutura
 
 ```
-src/SatusBlockchain.Node/          # nó da blockchain (ASP.NET Core)
-tests/SatusBlockchain.Node.Tests/  # testes de unidade (domínio) e de integração (API)
+src/SatusBlockchain.Node/                  # nó da blockchain (ASP.NET Core)
+tests/SatusBlockchain.Node.Tests/          # testes: unidade (Unit/) e integração (Integration/)
 ```
 
 ## Como executar (nó único)
 
 ```powershell
 dotnet build
-dotnet test                                          # unidade + integração (~25s)
+dotnet test                                             # tudo: unidade + integração (~25s)
 
-# atalhos
-dotnet test --filter "FullyQualifiedName!~ApiTests"  # só unidade (segundos)
-dotnet test --filter "FullyQualifiedName~ApiTests"   # só integração da API
+# atalhos: uma pasta por tipo de teste (namespaces Tests.Unit / Tests.Integration)
+dotnet test --filter "FullyQualifiedName~Tests.Unit"         # só unidade  (~5s)
+dotnet test --filter "FullyQualifiedName~Tests.Integration"  # só integração (~20s)
 
 # sobe o nó (NODE_ID e DIFFICULTY são opcionais)
 $env:NODE_ID = "node1"
@@ -40,31 +41,40 @@ dotnet run --project src/SatusBlockchain.Node
 
 ### Testes
 
-- **Unidade** (`Core/*Tests.cs`): `Block`, `Hasher`, `ProofOfWork`, `Blockchain`,
-  `Mempool`, `NodeOptions`. Determinísticos e instantâneos.
-- **Integração** (`Api/ApiTests.cs`): sobe o executável do nó em uma porta livre e
-  conversa por HTTP — valida rotas, status codes, JSON, `NODE_ID`/`DIFFICULTY` do
-  ambiente e o fluxo mempool → bloco. Um processo novo por teste (isolamento total).
+Um projeto de teste só, com **uma pasta por tipo** — `Unit/` e `Integration/` — cada uma
+com seu namespace, o que permite rodar só um conjunto pelo filtro:
+
+- **Unidade** (`tests/SatusBlockchain.Node.Tests/Unit`): `Block`, `Hasher`, `ProofOfWork`,
+  `Blockchain`, `Mempool`, `NodeOptions`. Testam classes isoladas — sem rede, sem HTTP,
+  sem subir processo. Determinísticos e instantâneos.
+- **Integração** (`tests/SatusBlockchain.Node.Tests/Integration`): sobe o executável do nó em
+  uma porta livre e conversa por HTTP — valida rotas, status codes, JSON, `NODE_ID`/`DIFFICULTY`
+  do ambiente e o fluxo mempool → bloco. Um processo novo por teste (isolamento total).
 
 ### Uso da API
 
+O nó sobe em `http://localhost:5165` (definido em
+`src/SatusBlockchain.Node/Properties/launchSettings.json`). Para testar no
+Postman, importe `postman/SatusBlockchain.postman_collection.json` — roteiro
+passo a passo em [postman/README.md](postman/README.md).
+
 ```powershell
 # situação do nó
-curl http://localhost:5000/
+curl http://localhost:5165/
 
 # criar transações (vão para a mempool)
-curl -X POST http://localhost:5000/transactions `
+curl -X POST http://localhost:5165/transactions `
   -H "Content-Type: application/json" `
   -d '{"from":"alice","to":"bob","amount":10}'
 
-curl http://localhost:5000/transactions/pending
+curl http://localhost:5165/transactions/pending
 
 # minerar um bloco com as transações pendentes (~1s)
-curl -X POST http://localhost:5000/blocks/mine
+curl -X POST http://localhost:5165/blocks/mine
 
 # conferir a cadeia
-curl http://localhost:5000/chain
-curl http://localhost:5000/chain/validate
+curl http://localhost:5165/chain
+curl http://localhost:5165/chain/validate
 ```
 
 | Endpoint | Descrição |

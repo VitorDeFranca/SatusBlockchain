@@ -1,0 +1,385 @@
+{
+  "info": {
+    "_postman_id": "3f7c1b90-6c4a-4f2e-9a10-8d5b2e7c4a11",
+    "name": "SatusBlockchain - no unico (Etapa 4)",
+    "description": "Roteiro manual da Etapa 4 (API REST do no unico).\n\nANTES DE COMECAR:\n1. Suba o no com DIFFICULTY=2 (mineracao instantanea).\n2. Confira a variavel baseUrl (padrao http://localhost:5165).\n3. Se mudar a DIFFICULTY, atualize a variavel difficulty (ela e usada no teste de Proof of Work).\n\nORDEM: execute os requests de 1 a 8. Para rodar tudo de uma vez com os testes automatizados, use o Collection Runner (botao 'Run').",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5165"
+    },
+    {
+      "key": "difficulty",
+      "value": "2"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Situacao do no",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const no = pm.response.json();",
+              "pm.test('identifica o no (NODE_ID)', () => pm.expect(no.node).to.be.a('string'));",
+              "pm.test('existe pelo menos o genesis', () => pm.expect(no.blocks).to.be.at.least(1));",
+              "pm.test('cadeia valida', () => pm.expect(no.valid).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/",
+          "host": ["{{baseUrl}}"],
+          "path": [""]
+        },
+        "description": "GET / — identidade do no, dificuldade, tamanho e validade da cadeia. E o request de 'o no esta de pe?'."
+      }
+    },
+    {
+      "name": "2. Cadeia completa",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const cadeia = pm.response.json();",
+              "pm.test('e uma lista de blocos', () => pm.expect(cadeia).to.be.an('array').that.is.not.empty);",
+              "pm.test('o primeiro bloco e o genesis (indice 0)', () => pm.expect(cadeia[0].index).to.eql(0));",
+              "pm.test('o genesis aponta para o hash zero', () => pm.expect(cadeia[0].previousHash).to.eql('0'));",
+              "pm.test('todo bloco tem hash de 64 caracteres', () => {",
+              "    cadeia.forEach((bloco) => pm.expect(bloco.hash).to.have.lengthOf(64));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/chain",
+          "host": ["{{baseUrl}}"],
+          "path": ["chain"]
+        },
+        "description": "GET /chain — a cadeia inteira em JSON. O bloco 0 e o genesis (mesmo em todos os nos)."
+      }
+    },
+
+    {
+      "name": "3. Validar cadeia",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('cadeia valida (encadeamento + PoW)', () => pm.expect(r.valid).to.be.true);",
+              "pm.test('informa o tamanho da cadeia', () => pm.expect(r.length).to.be.at.least(1));",
+              "pm.test('informa o hash do ultimo bloco', () => pm.expect(r.latestHash).to.have.lengthOf(64));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/chain/validate",
+          "host": ["{{baseUrl}}"],
+          "path": ["chain", "validate"]
+        },
+        "description": "GET /chain/validate — recalcula o encadeamento e o Proof of Work de toda a cadeia. Se alguem mexer num bloco, isto vira false."
+      }
+    },
+
+    {
+      "name": "4. Criar transacao (alice -> bob)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "pm.test('Location aponta para a mempool', () => pm.expect(pm.response.headers.get('Location')).to.eql('/transactions/pending'));",
+              "",
+              "const tx = pm.response.json();",
+              "pm.test('devolve a transacao recebida', () => {",
+              "    pm.expect(tx.from).to.eql('alice');",
+              "    pm.expect(tx.to).to.eql('bob');",
+              "    pm.expect(Number(tx.amount)).to.eql(10);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"from\": \"alice\",\n  \"to\": \"bob\",\n  \"amount\": 10\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/transactions",
+          "host": ["{{baseUrl}}"],
+          "path": ["transactions"]
+        },
+        "description": "POST /transactions — coloca a transacao na mempool (a fila de espera). Ainda NAO virou bloco: ela so entra na cadeia quando alguem minerar."
+      }
+    },
+
+    {
+      "name": "5. Criar transacao (bob -> carol)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "",
+              "const tx = pm.response.json();",
+              "pm.test('segunda transacao aceita na mempool', () => {",
+              "    pm.expect(tx.from).to.eql('bob');",
+              "    pm.expect(tx.to).to.eql('carol');",
+              "    pm.expect(Number(tx.amount)).to.eql(5);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"from\": \"bob\",\n  \"to\": \"carol\",\n  \"amount\": 5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/transactions",
+          "host": ["{{baseUrl}}"],
+          "path": ["transactions"]
+        },
+        "description": "POST /transactions — a mempool aceita varias transacoes; todas as pendentes entram no proximo bloco minerado."
+      }
+    },
+
+    {
+      "name": "6. Ver pendentes (antes de minerar)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const pendentes = pm.response.json();",
+              "pm.test('e uma lista de transacoes', () => pm.expect(pendentes).to.be.an('array').that.is.not.empty);",
+              "pm.test('contem a transacao alice -> bob', () => {",
+              "    const achou = pendentes.some((t) => t.from === 'alice' && t.to === 'bob' && Number(t.amount) === 10);",
+              "    pm.expect(achou).to.be.true;",
+              "});",
+              "pm.test('nada foi para a cadeia ainda', () => pm.expect(pendentes.length).to.be.at.least(1));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/transactions/pending",
+          "host": ["{{baseUrl}}"],
+          "path": ["transactions", "pending"]
+        },
+        "description": "GET /transactions/pending — o conteudo da mempool. Note que as transacoes existem aqui, mas ainda NAO estao em nenhum bloco."
+      }
+    },
+
+    {
+      "name": "7. Minerar bloco",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK (a cadeia nao mudou durante a mineracao)', () => pm.response.to.have.status(200));",
+              "",
+              "const bloco = pm.response.json();",
+              "pm.test('bloco encadeado no topo da cadeia', () => {",
+              "    pm.expect(bloco.index).to.be.at.least(1);",
+              "    pm.expect(bloco.previousHash).to.have.lengthOf(64);",
+              "});",
+              "pm.test('Proof of Work valido (hash com N zeros)', () => {",
+              "    const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+              "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+              "});",
+              "pm.test('leva as transacoes pendentes para dentro do bloco', () => pm.expect(bloco.transactions).to.be.an('array'));",
+              "pm.test('toda transacao tem valor > 0', () => {",
+              "    bloco.transactions.forEach((t) => pm.expect(Number(t.amount)).to.be.above(0));",
+              "});",
+              "pm.test('nonce foi encontrado (>= 0)', () => pm.expect(bloco.nonce).to.be.at.least(0));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/blocks/mine",
+          "host": ["{{baseUrl}}"],
+          "path": ["blocks", "mine"]
+        },
+        "description": "POST /blocks/mine — minera com o que estiver na mempool e anexa o bloco a cadeia. Aqui o Proof of Work roda de verdade: na dificuldade 4 leva ~1 segundo (por isso DIFFICULTY=2 no teste manual).\n\nSe responder 409, a cadeia avancou durante a mineracao: as transacoes continuam pendentes, basta minerar de novo."
+      }
+    },
+
+    {
+      "name": "8. Ver pendentes (depois de minerar)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const pendentes = pm.response.json();",
+              "pm.test('mempool esvaziada: tudo virou bloco', () => pm.expect(pendentes).to.be.an('array').that.is.empty);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/transactions/pending",
+          "host": ["{{baseUrl}}"],
+          "path": ["transactions", "pending"]
+        },
+        "description": "GET /transactions/pending — depois da mineracao a fila fica vazia: as transacoes passaram de 'pendentes' para 'dentro do bloco 1'."
+      }
+    },
+
+    {
+      "name": "9. Transacao invalida (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+              "",
+              "const erro = pm.response.json();",
+              "pm.test('explica o motivo da recusa', () => pm.expect(erro.error).to.include('From'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"from\": \"\",\n  \"to\": \"bob\",\n  \"amount\": 10\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/transactions",
+          "host": ["{{baseUrl}}"],
+          "path": ["transactions"]
+        },
+        "description": "POST /transactions com From vazio — a API valida a entrada e recusa com 400 (a transacao NAO entra na mempool).\n\nOutros casos que tambem dao 400: To vazio e Amount <= 0 (teste trocando o corpo)."
+      }
+    },
+
+    {
+      "name": "10. Cadeia depois da mineracao",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const cadeia = pm.response.json();",
+              "pm.test('a cadeia cresceu (genesis + bloco minerado)', () => pm.expect(cadeia.length).to.be.at.least(2));",
+              "pm.test('cada bloco aponta para o hash do anterior', () => {",
+              "    for (let i = 1; i < cadeia.length; i++) {",
+              "        pm.expect(cadeia[i].index).to.eql(cadeia[i - 1].index + 1, 'indice do bloco ' + i);",
+              "        pm.expect(cadeia[i].previousHash).to.eql(cadeia[i - 1].hash, 'elo quebrado no bloco ' + i);",
+              "    }",
+              "});",
+              "pm.test('o ultimo bloco tem as transacoes mineradas', () => {",
+              "    const ultimo = cadeia[cadeia.length - 1];",
+              "    pm.expect(ultimo.transactions).to.be.an('array');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/chain",
+          "host": ["{{baseUrl}}"],
+          "path": ["chain"]
+        },
+        "description": "GET /chain — confere o encadeamento de ponta a ponta: e essa verificacao de 'previousHash de um == hash do outro' que faz a cadeia ser a cadeia."
+      }
+    }
+  ]
+}

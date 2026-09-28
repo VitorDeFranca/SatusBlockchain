@@ -1,6 +1,6 @@
 using SatusBlockchain.Node.Core;
 
-namespace SatusBlockchain.Node.Tests;
+namespace SatusBlockchain.Node.Tests.Unit;
 
 public class HasherTests
 {

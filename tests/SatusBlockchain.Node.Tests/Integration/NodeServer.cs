@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
-namespace SatusBlockchain.Node.Tests.Api;
+namespace SatusBlockchain.Node.Tests.Integration;
 
 /// <summary>
 /// Sobe o executável REAL do nó (o mesmo que roda via <c>dotnet run</c> / Docker)

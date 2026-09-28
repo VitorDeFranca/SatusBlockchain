@@ -2,18 +2,38 @@
     "version": "0.2.0",
     "configurations": [
         {
-            // Use IntelliSense to find out which attributes exist for C# debugging
-            // Use hover for the description of the existing attributes
-            // For further information visit https://github.com/dotnet/vscode-csharp/blob/main/debugger-launchjson.md
-            "name": ".NET Core Launch (console)",
+            // Roda o nó da blockchain. É o alvo útil para depurar: sobe a API e você
+            // testa pelo Postman/curl. Sem ASPNETCORE_URLS, o Kestrel usaria a porta 5000
+            // (o launchSettings.json só vale para `dotnet run`), então fixamos a 5165.
+            "name": "Nó da blockchain (API)",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            // If you have changed target frameworks, make sure to update the program path.
+            "program": "${workspaceFolder}/src/SatusBlockchain.Node/bin/Debug/net10.0/SatusBlockchain.Node.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/src/SatusBlockchain.Node",
+            // Variáveis de ambiente lidas pelo nó (NodeOptions, etapa 4).
+            // DIFFICULTY=2 minera em milissegundos; 4 é o padrão (~1s por bloco).
+            "env": {
+                "ASPNETCORE_URLS": "http://localhost:5165",
+                "NODE_ID": "node1",
+                "DIFFICULTY": "2"
+            },
+            "console": "integratedTerminal",
+            "serverReadyAction": {
+                "action": "openExternally",
+                "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+            }
+        },
+        {
+            // Executa a suíte de testes de integração (sobe o nó em porta livre, por teste).
+            "name": "Testes de integração",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
             "program": "${workspaceFolder}/tests/SatusBlockchain.Node.Tests/bin/Debug/net10.0/SatusBlockchain.Node.Tests.dll",
             "args": [],
             "cwd": "${workspaceFolder}/tests/SatusBlockchain.Node.Tests",
-            // For more information about the 'console' field, see https://aka.ms/VSCode-CS-LaunchJson-Console
             "console": "internalConsole",
             "stopAtEntry": false
         },

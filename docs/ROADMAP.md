@@ -23,6 +23,15 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 - Testes acompanham as etapas 1–4 (não são etapa separada): **unidade** para o domínio
   (etapas 1–3) e **integração HTTP** para a API (etapa 4), subindo o nó real em um
   processo isolado, em porta livre.
+- Os testes ficam em **um projeto só** (`tests/SatusBlockchain.Node.Tests`), com uma pasta
+  por tipo: `Unit/` (domínio isolado, sem rede) e `Integration/` (sobe o nó e conversa por
+  HTTP). Os namespaces `…Tests.Unit` / `…Tests.Integration` permitem rodar só um conjunto:
+  `dotnet test --filter "FullyQualifiedName~Tests.Unit"` (segundos, sem rede) ou
+  `…~Tests.Integration` (~20s). Um projeto só mantém a árvore da solução curta.
+- Correção na etapa 4: o `DIFFICULTY` do ambiente passou a construir a `Blockchain`.
+  Antes ele era apenas lido e reportado pelo `GET /` — a cadeia minerava sempre na
+  dificuldade padrão (4), o que quebrava o conceito de "configuração por ambiente"
+  da etapa 5. Regressão coberta por `ApiTests.DifficultyDoAmbiente_ChegaNaCadeia`.
 - A API (etapa 4) vem antes do Docker (etapa 5): depurar um nó via `dotnet run`
   é muito mais rápido que dentro de container.
 - O desacoplamento push (etapa 6) / pull (etapa 7) permite demonstrar primeiro a

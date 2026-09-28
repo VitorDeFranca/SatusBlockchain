@@ -7,7 +7,7 @@
             "type": "process",
             "args": [
                 "build",
-                "${workspaceFolder}/tests/SatusBlockchain.Node.Tests/SatusBlockchain.Node.Tests.csproj",
+                "${workspaceFolder}/SatusBlockchain.sln",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary;ForceNoAlign"
             ],
@@ -19,7 +19,7 @@
             "type": "process",
             "args": [
                 "publish",
-                "${workspaceFolder}/tests/SatusBlockchain.Node.Tests/SatusBlockchain.Node.Tests.csproj",
+                "${workspaceFolder}/src/SatusBlockchain.Node/SatusBlockchain.Node.csproj",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary;ForceNoAlign"
             ],
@@ -33,9 +33,31 @@
                 "watch",
                 "run",
                 "--project",
-                "${workspaceFolder}/tests/SatusBlockchain.Node.Tests/SatusBlockchain.Node.Tests.csproj"
+                "${workspaceFolder}/src/SatusBlockchain.Node/SatusBlockchain.Node.csproj"
             ],
             "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "test: unidade",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "${workspaceFolder}/tests/SatusBlockchain.Node.Tests/SatusBlockchain.Node.Tests.csproj",
+                "--filter",
+                "FullyQualifiedName~Tests.Unit"
+            ]
+        },
+        {
+            "label": "test: integração",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "${workspaceFolder}/tests/SatusBlockchain.Node.Tests/SatusBlockchain.Node.Tests.csproj",
+                "--filter",
+                "FullyQualifiedName~Tests.Integration"
+            ]
         }
     ]
 }

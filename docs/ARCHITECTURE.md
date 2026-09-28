@@ -48,6 +48,8 @@ SatusBlockchain/
 │       └── Dockerfile         # (etapa 5)
 ├── tests/
 │   └── SatusBlockchain.Node.Tests/
+│       ├── Unit/               # domínio isolado (sem rede, sem processo)
+│       └── Integration/        # sobe o nó e conversa por HTTP
 ├── docker-compose.yml         # (etapa 5)
 ├── SatusBlockchain.sln
 └── README.md

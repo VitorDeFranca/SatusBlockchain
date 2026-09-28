@@ -9,7 +9,11 @@ var nodeOptions = NodeOptions.FromConfiguration(builder.Configuration);
 
 // Estado do nó: instâncias únicas em memória (o estado replicado de cada nó).
 builder.Services.AddSingleton(nodeOptions);
-builder.Services.AddSingleton<Blockchain>();
+// A cadeia precisa da dificuldade CONFIGURADA: sem esta fábrica, o container
+// usaria o valor padrão do parâmetro do construtor (ProofOfWork.DefaultDifficulty)
+// e o DIFFICULTY do ambiente seria ignorado — o nó reportaria "2" e mineraria na
+// dificuldade 4. Regressão coberta por ApiTests.DifficultyDoAmbiente_ChegaNaCadeia.
+builder.Services.AddSingleton(_ => new Blockchain(nodeOptions.Difficulty));
 builder.Services.AddSingleton<Mempool>();
 
 var app = builder.Build();

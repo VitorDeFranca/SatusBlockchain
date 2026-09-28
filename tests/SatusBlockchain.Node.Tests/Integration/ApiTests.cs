@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using SatusBlockchain.Node.Core;
 
-namespace SatusBlockchain.Node.Tests.Api;
+namespace SatusBlockchain.Node.Tests.Integration;
 
 /// <summary>
 /// Testes de integração da API REST (Etapa 4). Cada teste sobe um nó real, isolado,
@@ -165,6 +165,25 @@ public class ApiTests
 
         Assert.NotEqual(0, process.ExitCode);
         Assert.Contains("DIFFICULTY inválida", stderr);
+    }
+
+    [Fact]
+    public async Task DifficultyDoAmbiente_ChegaNaCadeia()
+    {
+        // Com DIFFICULTY=0 o primeiro nonce testado (0) já satisfaz o Proof of Work.
+        // Se o valor do ambiente não chegasse à Blockchain, ela cairia na dificuldade
+        // padrão (4) e o nonce seria > 0 — foi exatamente esse o bug de fiação do DI.
+        using var node = await NodeServer.StartAsync(difficulty: 0);
+
+        using var chain = await GetJsonAsync(node, "/chain");
+        var genesis = Assert.Single(Elements(chain.RootElement));
+        Assert.Equal(0, genesis.GetProperty("nonce").GetInt64());
+
+        var response = await node.Client.PostAsync("/blocks/mine", content: null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var block = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(0, block.RootElement.GetProperty("nonce").GetInt64());
     }
 
     private static async Task<JsonDocument> GetJsonAsync(NodeServer node, string path)
