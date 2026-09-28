@@ -13,21 +13,22 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 | 3 | Proof of Work | `ProofOfWork`, dificuldade configurável, testes | Custo computacional, resistência à reescrita do histórico | ✅ |
 | 4 | API REST (nó único) | Endpoints: chain, transactions, mine (sem peers) | Nó como serviço autônomo, contrato de comunicação | ✅ |
 | 5 | Docker + Compose | `Dockerfile` multi-stage, `docker-compose.yml` com 3 nós isolados | Processos independentes, redes, configuração por ambiente | ✅ |
-| 6 | Propagação (push) | `PeerClient`, broadcast no mine, `/blocks/receive` | Comunicação nó-a-nó, replicação de estado, tolerância a peer offline | ⬜ |
+| 6 | Propagação (push) | `PeerClient`, broadcast no mine, `/blocks/receive` | Comunicação nó-a-nó, replicação de estado, tolerância a peer offline | ✅ |
 | 7 | Consenso e sync (pull) | Longest chain rule, `/sync`, substituição de cadeia (reorg) | Consenso, consistência eventual, recuperação após falha | ⬜ |
 | 8 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
 | 9 | Fechamento | README final, docs atualizados, roteiro de apresentação | — | ⬜ |
 
 ## Notas de ordenação
 
-- Testes acompanham as etapas 1–4 (não são etapa separada): **unidade** para o domínio
-  (etapas 1–3) e **integração HTTP** para a API (etapa 4), subindo o nó real em um
-  processo isolado, em porta livre.
+- Testes acompanham as etapas 1–6 (não são etapa separada): **unidade** para o domínio e para
+  o `PeerClient` (etapas 1–3 e 6) e **integração HTTP** para a API (etapas 4 e 6), subindo o nó
+  real em um processo isolado, em porta livre.
 - Os testes ficam em **um projeto só** (`tests/SatusBlockchain.Node.Tests`), com uma pasta
   por tipo: `Unit/` (domínio isolado, sem rede) e `Integration/` (sobe o nó e conversa por
   HTTP). Os namespaces `…Tests.Unit` / `…Tests.Integration` permitem rodar só um conjunto:
-  `dotnet test --filter "FullyQualifiedName~Tests.Unit"` (segundos, sem rede) ou
-  `…~Tests.Integration` (~20s). Um projeto só mantém a árvore da solução curta.
+  `dotnet test --filter "FullyQualifiedName~Tests.Unit"` (~20s, sem rede) ou
+  `…~Tests.Integration` (~26s, sobe o nó real em porta livre). Um projeto só mantém a árvore
+  da solução curta.
 - Correção na etapa 4: o `DIFFICULTY` do ambiente passou a construir a `Blockchain`.
   Antes ele era apenas lido e reportado pelo `GET /` — a cadeia minerava sempre na
   dificuldade padrão (4), o que quebrava o conceito de "configuração por ambiente"
@@ -52,6 +53,41 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   é muito mais rápido que dentro de container.
 - O desacoplamento push (etapa 6) / pull (etapa 7) permite demonstrar primeiro a
   propagação "feliz" e só depois falhas, recuperação e consenso.
+- Etapa 6 (push): `Networking/PeerClient` envia o bloco minerado a cada peer em **paralelo**
+  (`POST /blocks/receive`) e o `POST /blocks/mine` **aguarda** o push antes de responder —
+  decisão que torna demo e testes determinísticos: quando o mine responde, os peers já têm
+  o bloco. O timeout do cliente HTTP é 2 s e cada envio é isolado: peer offline/mudo vira
+  log de aviso + `inacessível`, nunca exceção. O receptor **não** re-propaga (sem cascata:
+  com as listas completas de `PEERS`, um hop alcança os 3 nós).
+- Etapa 6 (contrato do recebimento): `POST /blocks/receive` aceita o **bloco cru** — o mesmo
+  shape de um item de `GET /chain`, o que permite copiar um bloco de um nó e postar no
+  outro — e responde **200** ao anexar, **409** quando o bloco não estende a cadeia local
+  (duplicado, órfão ou adulterado) e **400** em JSON malformado. A decisão é do domínio
+  (`Blockchain.AddBlock`: índice, elo, hash recalculado e PoW), sem autenticação de emissor.
+  As transações do bloco aceito saem da mempool local; sem isso o nó re-mineraria a mesma
+  transação e criaria um fork à toa.
+- Etapa 6 (configuração): `PEERS` entrou no `NodeOptions` com validação na subida
+  (`ParsePeers`: URL http(s) absoluta, espaços/barra final normalizados, repetições
+  descartadas) e ficou visível em `GET /peers`. O contrato do `POST /blocks/mine` **não**
+  mudou: o resultado do push fica no log, o endpoint continua devolvendo o bloco — por isso
+  os testes e o Postman da etapa 4 seguem válidos sem edição.
+- Etapa 6 (dificuldade 4 no compose): `NODE_DIFFICULTY` passou a ter padrão **4** (~1s por
+  bloco) para a propagação ser observável no log. Os testes de integração continuam fixando
+  `DIFFICULTY=2` por processo, então a suíte não ficou mais lenta por causa disso.
+  - Armadilha registrada: os três nós precisam da **mesma** dificuldade. O genesis é
+    minerado na dificuldade do nó, então genesis(2) ≠ genesis(4) e um bloco de 2 zeros não
+    satisfaz o PoW de quem exige 4 — o peer recusaria tudo. Por isso os três serviços usam
+    a mesma `${NODE_DIFFICULTY:-4}`, e `PEERS` é fixo por serviço (sem interpolação de
+    shell, pelo mesmo motivo que originou o `NODE_DIFFICULTY`).
+  - Efeito colateral bem-vindo: com ~1s de mineração, a corrida "a cadeia mudou durante a
+    mineração" (409 no `POST /blocks/mine`) fica reproduzível — minerar em dois nós dentro
+    da janela faz o segundo receber o bloco do primeiro por push e descartar o próprio PoW,
+    mantendo a transação na mempool. É o caminho de concorrência que o `Blockchain` já
+    protegia e que só passa a acontecer de verdade quando existe propagação.
+- Teste de unidade da propagação: `PeerClientTests` usa um `HttpMessageHandler` escrito à
+  mão (sem Moq — o projeto não tem pacote de mock) para verificar, de forma
+  determinística, que todo peer recebe o bloco, que 409 é reportado como "não aceito" sem
+  exceção e que um peer inacessível não impede o envio aos demais.
 
 ## Cenário de demonstração final (referência para as etapas)
 

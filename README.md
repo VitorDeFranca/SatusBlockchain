@@ -27,15 +27,16 @@ tests/SatusBlockchain.Node.Tests/          # testes: unidade (Unit/) e integraç
 
 ```powershell
 dotnet build
-dotnet test                                             # tudo: unidade + integração (~25s)
+dotnet test                                             # tudo: unidade + integração (~50s)
 
 # atalhos: uma pasta por tipo de teste (namespaces Tests.Unit / Tests.Integration)
-dotnet test --filter "FullyQualifiedName~Tests.Unit"         # só unidade  (~5s)
-dotnet test --filter "FullyQualifiedName~Tests.Integration"  # só integração (~20s)
+dotnet test --filter "FullyQualifiedName~Tests.Unit"         # só unidade  (~20s, sem rede)
+dotnet test --filter "FullyQualifiedName~Tests.Integration"  # só integração (~26s, sobe nós reais)
 
-# sobe o nó (NODE_ID e DIFFICULTY são opcionais)
+# sobe o nó (NODE_ID, DIFFICULTY e PEERS são opcionais)
 $env:NODE_ID = "node1"
 $env:DIFFICULTY = "4"      # zeros hexadecimais do PoW; padrão 4 (~1s por bloco)
+$env:PEERS = "http://localhost:5166,http://localhost:5167"   # opcional: outros nós (etapa 6)
 dotnet run --project src/SatusBlockchain.Node
 ```
 
@@ -49,7 +50,9 @@ com seu namespace, o que permite rodar só um conjunto pelo filtro:
   sem subir processo. Determinísticos e instantâneos.
 - **Integração** (`tests/SatusBlockchain.Node.Tests/Integration`): sobe o executável do nó em
   uma porta livre e conversa por HTTP — valida rotas, status codes, JSON, `NODE_ID`/`DIFFICULTY`
-  do ambiente e o fluxo mempool → bloco. Um processo novo por teste (isolamento total).
+  do ambiente e o fluxo mempool → bloco. Na etapa 6, `PropagationTests` liga 2–3 nós por
+  `PEERS` para cobrir o push (bloco propagado, duplicado, adulterado, órfão e peer offline).
+  Um processo novo por teste (isolamento total).
 
 ### Uso da API
 
@@ -84,7 +87,9 @@ curl http://localhost:5165/chain/validate
 | `GET /chain/validate` | Valida encadeamento, hashes e Proof of Work |
 | `POST /transactions` | Adiciona transação à mempool |
 | `GET /transactions/pending` | Transações aguardando mineração |
-| `POST /blocks/mine` | Minera um bloco com a mempool |
+| `POST /blocks/mine` | Minera um bloco com a mempool e propaga aos peers (push) |
+| `POST /blocks/receive` | Recebe um bloco propagado (**200** aceito · **409** se não estende a cadeia) |
+| `GET /peers` | Peers configurados (`PEERS`) — o destino do push |
 
 ## Como executar (3 nós com Docker)
 
@@ -110,25 +115,70 @@ docker compose down               # derruba tudo
 | node3 | `http://localhost:8082` | `http://node3:8080` | `node3` |
 
 Os endereços `http://nodeN:8080` são o canal **entre os nós** — é por eles que a propagação
-da etapa 6 vai passar. Para comprovar que eles se enxergam, de dentro de um container:
+passa (é o valor de `PEERS` no `docker-compose.yml`). Para comprovar que eles se enxergam,
+de dentro de um container:
 
 ```powershell
 docker compose exec node2 curl -s http://node1:8080/
 ```
 
-**Dificuldade do PoW:** os containers usam `NODE_DIFFICULTY` (padrão `2` = mineração em
-milissegundos). Para sentir o custo do Proof of Work:
+**Dificuldade do PoW:** os containers usam `NODE_DIFFICULTY` (padrão `4` = ~1s por bloco,
+tempo suficiente para acompanhar a propagação acontecendo). Para uma demo rápida, com
+mineração em milissegundos:
 
 ```powershell
-$env:NODE_DIFFICULTY = "4"
-docker compose up -d --force-recreate      # ~1s por bloco
+$env:NODE_DIFFICULTY = "2"
+docker compose up -d --force-recreate      # mineração instantânea
 ```
 
-**O que ainda *não* acontece (e é esperado nesta etapa):** não há propagação entre os nós.
-Minerando em `node1`, os outros dois continuam com a própria cadeia — os três compartilham
-exatamente o mesmo bloco genesis (timestamp fixo), mas nada é replicado até a etapa 6.
+> Os **três** nós precisam da mesma dificuldade: o genesis é minerado na dificuldade do
+> nó, então genesis(dif 2) ≠ genesis(dif 4) e um bloco minerado com 2 zeros não satisfaz o
+> PoW de quem exige 4 — o peer recusaria tudo (409). Por isso os serviços compartilham a
+> mesma `${NODE_DIFFICULTY:-4}`; confira em `GET /` (`difficulty`).
 
-> Estado em memória: `docker compose restart node1` faz o node1 voltar ao genesis, sem
-> afetar os outros dois. É exatamente a situação que a etapa 7 (`POST /sync`) vai resolver.
+## Etapa 6: propagação entre os nós (push)
+
+Minou, propagou. Ao minerar, o nó envia o novo bloco a cada peer (`POST /blocks/receive`) —
+sem nenhuma sincronização — e os três passam a mostrar **a mesma cadeia**. Nó sem `PEERS`
+continua funcionando isolado, como na etapa 5.
+
+```powershell
+curl http://localhost:8080/peers     # node1 → http://node2:8080, http://node3:8080
+
+curl -X POST http://localhost:8080/transactions `
+  -H "Content-Type: application/json" -d '{"from":"alice","to":"bob","amount":10}'
+
+curl -X POST http://localhost:8080/blocks/mine     # ~1s de PoW (dificuldade 4) + push
+
+curl http://localhost:8081/          # node2: blocks = 2, valid = true
+curl http://localhost:8082/          # node3: blocks = 2, valid = true
+```
+
+O push é **aguardado** antes de o mine responder (e os envios são paralelos): quando o
+`POST /blocks/mine` retorna, os peers já receberam o bloco — por isso a conferência acima é
+determinística. Quem envia aparece no log:
+
+```powershell
+docker compose logs -f node1         # "Bloco 1 propagado para http://node2:8080", ...
+```
+
+**Tolerância a peer offline** — derrube um nó e minere de novo:
+
+```powershell
+docker compose stop node3
+curl -X POST http://localhost:8080/blocks/mine     # 200: a mineração local NÃO depende do node3
+docker compose logs node1 --tail 5                 # "Peer http://node3:8080 inacessível: ..."
+docker compose start node3
+curl http://localhost:8082/                        # blocks = 1: voltou ao genesis (estado em memória)
+```
+
+**O que ainda *não* acontece (e é esperado nesta etapa):** o nó que estava fora **não** se
+recupera sozinho. Ele recebe os próximos blocos, mas os recusa com **409** — eles não
+encaixam na cadeia dele (índice/elo fora de sequência). É exatamente a lacuna que o
+`POST /sync` da etapa 7 fecha (longest chain rule + reorg).
+
+> Duplicidade e adulteração são recusadas na porta de entrada: reenviar o mesmo bloco, ou
+> postar o bloco com o conteúdo trocado, responde **409** e não mexe na cadeia —
+> `Blockchain.AddBlock` recalcula o hash e valida o Proof of Work antes de anexar.
 
 O roadmap completo (propagação, consenso e forks) está em [docs/ROADMAP.md](docs/ROADMAP.md).

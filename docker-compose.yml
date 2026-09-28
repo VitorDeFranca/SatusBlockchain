@@ -5,17 +5,23 @@
 #   docker compose logs -f node1     # log de um nó
 #   docker compose down              # derruba tudo
 #
-# Dificuldade do PoW: os containers usam NODE_DIFFICULTY do ambiente, com padrão 2
-# (mineração em milissegundos). Para demonstrar o custo do Proof of Work:
-#   $env:NODE_DIFFICULTY = "4"; docker compose up -d --force-recreate   # ~1s por bloco
+# Dificuldade do PoW: os containers usam NODE_DIFFICULTY do ambiente, com padrão 4
+# (~1s por bloco — dá para acompanhar a propagação da etapa 6 acontecendo).
+# Para voltar a uma mineração instantânea (útil em teste manual rápido):
+#   $env:NODE_DIFFICULTY = "2"; docker compose up -d --force-recreate
 # O nome é diferente de DIFFICULTY de propósito: o README manda usar $env:DIFFICULTY
 # para o `dotnet run`, e uma variável "esquecida" no shell mudaria a dificuldade dos
-# containers sem querer (foi exatamente o que aconteceu durante os testes desta etapa:
+# containers sem querer (foi exatamente o que aconteceu durante os testes da etapa 5:
 # os nós subiram com dificuldade 6, herdada de um teste anterior de PoW).
+#
+# PRÉ-REQUISITO da propagação: os TRÊS nós precisam da MESMA dificuldade. O genesis é
+# minerado na dificuldade do nó, então genesis(dif=4) != genesis(dif=2) e um bloco
+# minerado com 2 zeros não satisfaz o PoW de quem exige 4 — o peer recusaria tudo.
+# Por isso os três serviços usam a MESMA variável ${NODE_DIFFICULTY:-4}.
 #
 # Rede interna: cada nó é resolvido pelo NOME DO SERVIÇO
 #   http://node1:8080   http://node2:8080   http://node3:8080
-# É esse endereço que a Etapa 6 vai usar como peer (PEERS=...).
+# É esse endereço que a Etapa 6 usa como peer (PEERS).
 # Do host, o acesso é por localhost:8080 (node1), :8081 (node2), :8082 (node3).
 #
 # Os três serviços são idênticos exceto por NODE_ID e pela porta publicada no
@@ -32,9 +38,11 @@ services:
     container_name: node1
     environment:
       NODE_ID: node1
-      # NODE_DIFFICULTY (padrão 2 = mineração em ms); nome próprio para não herdar
+      # Peers deste nó (endereço INTERNO do Docker): os outros dois.
+      PEERS: "http://node2:8080,http://node3:8080"
+      # NODE_DIFFICULTY (padrão 4 = ~1s por bloco); nome próprio para não herdar
       # a variável DIFFICULTY usada pelo `dotnet run` no mesmo shell.
-      DIFFICULTY: "${NODE_DIFFICULTY:-2}"
+      DIFFICULTY: "${NODE_DIFFICULTY:-4}"
     ports:
       - "8080:8080"
     networks:
@@ -49,7 +57,8 @@ services:
     container_name: node2
     environment:
       NODE_ID: node2
-      DIFFICULTY: "${NODE_DIFFICULTY:-2}"
+      PEERS: "http://node1:8080,http://node3:8080"
+      DIFFICULTY: "${NODE_DIFFICULTY:-4}"
     ports:
       - "8081:8080"
     networks:
@@ -64,7 +73,8 @@ services:
     container_name: node3
     environment:
       NODE_ID: node3
-      DIFFICULTY: "${NODE_DIFFICULTY:-2}"
+      PEERS: "http://node1:8080,http://node2:8080"
+      DIFFICULTY: "${NODE_DIFFICULTY:-4}"
     ports:
       - "8082:8080"
     networks:

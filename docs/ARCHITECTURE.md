@@ -85,7 +85,7 @@ SatusBlockchain/
 | `ProofOfWork` | Encontrar nonce que satisfaça a dificuldade; verificar nonce | decidir política de dificuldade |
 | `Blockchain` | Cadeia em memória: genesis, adição de bloco, validação, substituição (reorg) | falar HTTP |
 | `Mempool` | Fila FIFO de transações pendentes | priorização por taxa |
-| `PeerClient` | HTTP de saída: broadcast de bloco, consulta de cadeia dos peers | regras de consenso |
+| `PeerClient` | HTTP de saída: broadcast de bloco tolerante a peer offline (push, etapa 6) | consultar a cadeia dos peers (pull, etapa 7); regras de consenso |
 | Endpoints | Exposição REST do nó | lógica de domínio |
 
 ## 4. Modelo de dados
@@ -119,12 +119,38 @@ gerar hashes diferentes em nós diferentes.
 
 ## 6. Comunicação entre nós
 
-- **Push (propagação)**: ao minerar, o nó envia o novo bloco a cada peer
-  (`POST /blocks/receive`). Falhas de envio a um peer são toleradas (log + segue) —
-  um peer offline não pode derrubar a mineração local.
-- **Pull (sincronização)**: `POST /sync` consulta `GET /chain` de cada peer e aplica
-  a regra de consenso. Usado na inicialização e na recuperação após falha.
-- **Peers estáticos**: lidos no startup da variável `PEERS` (URLs separadas por vírgula).
+### Push (propagação) — etapa 6
+
+- `POST /blocks/mine` mina, propaga e **só então** responde: quando a resposta chega, os
+  peers já receberam o bloco (é o que torna a demo e os testes determinísticos).
+- `PeerClient.BroadcastBlockAsync` envia em **paralelo** para os peers de `PEERS`
+  (`POST /blocks/receive`), com timeout de 2 s no `HttpClient`.
+- **Tolerância a falhas**: cada envio é isolado. Peer offline (conexão recusada) ou mudo
+  (timeout) vira log de aviso + resultado `inacessível`; resposta **409** vira log de aviso
+  + "não aceito". Nada disso lança exceção nem impede a mineração local.
+- `POST /blocks/receive` recebe o **bloco cru** (mesmo shape de um item de `GET /chain`) e
+  delega a decisão ao domínio: `Blockchain.AddBlock` confere índice, elo de `PreviousHash`,
+  hash recalculado e Proof of Work. Aceito → **200** e as transações do bloco saem da
+  mempool local; recusado → **409**.
+- O receptor **não** re-propaga (sem cascata): com listas de peers completas, um hop
+  alcança os 3 nós.
+- Não há emissor autenticado: quem recusa bloco ruim é a validação do domínio
+  (hash recalculado + PoW), não a boa vontade do remetente.
+
+### Pull (sincronização) — etapa 7
+
+- `POST /sync` consulta `GET /chain` de cada peer e aplica a **longest chain rule**. É o
+  mecanismo que recupera o nó que ficou offline: no push puro ele apenas recusa os blocos
+  com 409, porque não encaixam na cadeia dele.
+
+### Peers estáticos
+
+- Lidos no startup da variável `PEERS` (URLs separadas por vírgula) e **validados na
+  subida**: entrada que não seja URL http(s) absoluta derruba o nó com mensagem clara.
+  Espaços e barra final são normalizados e repetições descartadas
+  (`NodeOptions.ParsePeers`).
+- Pré-requisito do push: **mesma dificuldade** em todos os nós — o genesis é minerado na
+  dificuldade do nó, então dificuldades diferentes geram cadeias incompatíveis.
 
 ## 7. Consenso
 
@@ -157,7 +183,7 @@ recebimento via push). Locks simples são suficientes no volume didático do pro
 | Variável | Exemplo | Descrição |
 |----------|---------|-----------|
 | `NODE_ID` | `node1` | Identificador amigável (logs e respostas) |
-| `PEERS` | `http://node2:8080,http://node3:8080` | Lista estática de peers |
+| `PEERS` | `http://node2:8080,http://node3:8080` | Lista estática de peers (destino do push), validada na subida |
 | `DIFFICULTY` | `4` | Zeros hexadecimais exigidos no PoW |
 | `ASPNETCORE_HTTP_PORTS` | `8080` | Porta HTTP do nó (definida no `Dockerfile`) |
 

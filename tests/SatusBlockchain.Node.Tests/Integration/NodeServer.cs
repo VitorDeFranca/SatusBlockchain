@@ -49,12 +49,14 @@ public sealed class NodeServer : IDisposable
     /// <summary>
     /// Sobe um nó e espera ele responder. <paramref name="difficulty"/> é tipado (byte)
     /// porque este é o caminho normal; valores inválidos são testados via
-    /// <see cref="CreateStartInfo"/>.
+    /// <see cref="CreateStartInfo"/>. <paramref name="peers"/> vem do endereço de outros
+    /// nós já subidos (<see cref="BaseAddress"/>) — é assim que a propagação é testada.
     /// </summary>
-    public static async Task<NodeServer> StartAsync(string nodeId = "node-test", byte difficulty = 2)
+    public static async Task<NodeServer> StartAsync(string nodeId = "node-test", byte difficulty = 2,
+        IEnumerable<string>? peers = null)
     {
         var address = $"http://127.0.0.1:{FreePort()}";
-        var startInfo = CreateStartInfo(address, nodeId, difficulty.ToString());
+        var startInfo = CreateStartInfo(address, nodeId, difficulty.ToString(), peers);
 
         var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Não foi possível iniciar o processo do nó.");
@@ -80,7 +82,8 @@ public sealed class NodeServer : IDisposable
     /// de ambiente. O ambiente é definido explicitamente para o teste não depender
     /// das variáveis de quem o executa.
     /// </summary>
-    public static ProcessStartInfo CreateStartInfo(string urls, string nodeId = "node-test", string difficulty = "2")
+    public static ProcessStartInfo CreateStartInfo(string urls, string nodeId = "node-test",
+        string difficulty = "2", IEnumerable<string>? peers = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -106,6 +109,9 @@ public sealed class NodeServer : IDisposable
 
         startInfo.Environment["NODE_ID"] = nodeId;
         startInfo.Environment["DIFFICULTY"] = difficulty;
+        // Definido SEMPRE (mesmo vazio): um PEERS deixado no ambiente de quem executa
+        // os testes faria o nó tentar propagar para peers que não existem.
+        startInfo.Environment["PEERS"] = peers is null ? string.Empty : string.Join(",", peers);
 
         return startInfo;
     }

@@ -19,12 +19,13 @@ No terminal aparece `Now listening on: http://localhost:5165`.
 > Use `DIFFICULTY=2` para testar no Postman: um bloco é minerado em milissegundos.
 > Se mudar para 4, ajuste também a variável `difficulty` do collection.
 >
-> **Com Docker (etapa 5):** suba os 3 nós com `docker compose up -d` (em vez do `dotnet run`)
+> **Com Docker (etapas 5–6):** suba os 3 nós com `docker compose up -d` (em vez do `dotnet run`)
 > e troque a variável `baseUrl` do collection para o nó que quiser testar:
 > `http://localhost:8080` (node1), `http://localhost:8081` (node2) ou
 > `http://localhost:8082` (node3). A dificuldade dos containers vem de `NODE_DIFFICULTY`
-> (padrão 2) — mantenha `difficulty = 2` no collection, ou suba com
-> `$env:NODE_DIFFICULTY = "4"; docker compose up -d --force-recreate` e ajuste a variável.
+> (**padrão 4 = ~1s por bloco**) — ajuste `difficulty = 4` no collection para os testes de
+> Proof of Work baterem. Para mineração instantânea:
+> `$env:NODE_DIFFICULTY = "2"; docker compose up -d --force-recreate` (e volte `difficulty = 2`).
 
 ## 2. Importe o collection
 
@@ -38,7 +39,7 @@ O collection já tem as variáveis:
 | `baseUrl` | `http://localhost:5165` | endereço do nó |
 | `difficulty` | `2` | testar o Proof of Work (`hash` começa com N zeros) |
 
-## 3. Execute na ordem 1 → 10
+## 3. Execute na ordem 1 → 11
 
 | # | Request | O que observar |
 |---|---------|----------------|
@@ -52,8 +53,37 @@ O collection já tem as variáveis:
 | 8 | `GET /transactions/pending` | **vazio** — as transações entraram no bloco |
 | 9 | `POST /transactions` (inválida) | **400 Bad Request** (`from` vazio, `amount <= 0`, etc.) |
 | 10 | `GET /chain` | cadeia com 2 blocos: cada `previousHash` igual ao `hash` do anterior |
+| 11 | `GET /peers` | peers configurados (`PEERS`) — vazio no `dotnet run` sem `PEERS`; com Docker, `http://node2:8080` e `http://node3:8080` |
 
-## 4. Rodar tudo de uma vez (Collection Runner)
+## 4. Propagação entre os nós (etapa 6)
+
+O roteiro acima testa **um** nó. Para ver a propagação, suba os 3 containers
+(`docker compose up -d --build`) e deixe o `baseUrl` no `node1`:
+
+1. `POST /transactions` (request 4) → a transação entra na mempool do node1;
+2. `POST /blocks/mine` (request 7) → ~1s de PoW e o bloco é **enviado aos peers**
+   (`POST /blocks/receive`) ainda dentro da mesma requisição;
+3. troque `baseUrl` para `http://localhost:8081` e chame `GET /` (request 1) e
+   `GET /chain` (request 2): o node2 já mostra o mesmo bloco, com o **mesmo hash**;
+4. repita com `http://localhost:8082` (node3) e com `GET /peers` (request 11).
+
+O resultado do push (aceito / recusado / inacessível) fica no log do nó que minerou:
+
+```powershell
+docker compose logs -f node1
+```
+
+**Peer offline:** com `docker compose stop node3`, o `POST /blocks/mine` continua
+respondendo **200** — a mineração local não depende dos peers — e o log mostra
+`Peer http://node3:8080 inacessível`. Ao religar (`docker compose start node3`), o node3
+volta ao genesis e **não** se recupera sozinho: ele recusa os blocos seguintes com **409**
+(índice/elo fora de sequência). É exatamente o que o `POST /sync` da etapa 7 resolve.
+
+**Reenvio e adulteração:** `POST /blocks/receive` com um bloco que o nó já tem — ou com o
+conteúdo alterado — responde **409** e não mexe na cadeia. Para testar, copie um bloco de
+`GET /chain` de um nó e cole no corpo de `POST {{baseUrl}}/blocks/receive` do outro.
+
+## 5. Rodar tudo de uma vez (Collection Runner)
 
 No collection, clique em **Run** → **Run SatusBlockchain**. O Postman executa
 os requests em ordem e mostra os testes (verde/vermelho) de cada um.
@@ -64,7 +94,7 @@ Postman precisa do nó já rodando e de alguém clicando; o teste em C# sobe o
 próprio nó, escolhe uma porta livre, faz os mesmos requests e roda com
 `dotnet test --filter "FullyQualifiedName~Tests.Integration"` (~20s).
 
-## 5. Se preferir sem Postman (PowerShell)
+## 6. Se preferir sem Postman (PowerShell)
 
 ```powershell
 $base = "http://localhost:5165"
@@ -90,7 +120,7 @@ Invoke-RestMethod "$base/blocks/mine" -Method Post | Format-List
 > O servidor está correto (o corpo cru mostra `[{...},{...}]`): para arrays, use
 > `(Invoke-WebRequest -UseBasicParsing <url>).Content | ConvertFrom-Json`.
 
-## 6. Erros comuns
+## 7. Erros comuns
 
 | Sintoma | Causa provável |
 |---|---|
@@ -98,3 +128,5 @@ Invoke-RestMethod "$base/blocks/mine" -Method Post | Format-List
 | Nó encerra na subida com "DIFFICULTY inválida" | `DIFFICULTY` fora de 0–64 |
 | `POST /blocks/mine` retorna **409** | a cadeia mudou durante a mineração (outro bloco entrou). É proposital: as transações continuam na memória; mine de novo |
 | Teste do PoW falhando | variável `difficulty` do collection diferente do `DIFFICULTY` do nó |
+| `POST /blocks/receive` retorna **409** | o bloco não estende a cadeia local: duplicado (já está na cadeia), órfão (índice fora de sequência — nó que ficou para trás) ou adulterado (hash/PoW não conferem) |
+| Bloco minerado não aparece no outro nó | o nó não tem o peer em `PEERS` (veja `GET /peers`), os nós estão com **dificuldades diferentes**, ou o outro nó reiniciou e voltou ao genesis — nesse caso ele recusa tudo com 409 até o `POST /sync` da etapa 7 |

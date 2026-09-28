@@ -2,17 +2,25 @@
   "info": {
     "_postman_id": "3f7c1b90-6c4a-4f2e-9a10-8d5b2e7c4a11",
     "name": "SatusBlockchain - no unico (Etapa 4)",
-    "description": "Roteiro manual da Etapa 4 (API REST do no unico).\n\nANTES DE COMECAR:\n1. Suba o no com DIFFICULTY=2 (mineracao instantanea).\n2. Confira a variavel baseUrl (padrao http://localhost:5165).\n3. Se mudar a DIFFICULTY, atualize a variavel difficulty (ela e usada no teste de Proof of Work).\n\nORDEM: execute os requests de 1 a 8. Para rodar tudo de uma vez com os testes automatizados, use o Collection Runner (botao 'Run').",
+    "description": "Roteiro manual da Etapa 4 (API REST do no unico).\n\nANTES DE COMECAR:\n1. Suba o no com DIFFICULTY=4.\n2. Confira a variavel node1Url (padrao http://localhost:8080).\n3. Se mudar a DIFFICULTY, atualize a variavel difficulty (ela e usada no teste de Proof of Work).\n\nORDEM: execute os requests de 1 a 8. Para rodar tudo de uma vez com os testes automatizados, use o Collection Runner (botao 'Run').",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
-      "key": "baseUrl",
-      "value": "http://localhost:5165"
+      "key": "node1Url",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "node2Url",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "node3Url",
+      "value": "http://localhost:8082"
     },
     {
       "key": "difficulty",
-      "value": "2"
+      "value": "4"
     }
   ],
   "item": [
@@ -38,8 +46,8 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/",
+          "host": ["{{node1Url}}"],
           "path": [""]
         },
         "description": "GET / — identidade do no, dificuldade, tamanho e validade da cadeia. E o request de 'o no esta de pe?'."
@@ -70,8 +78,8 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/chain",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/chain",
+          "host": ["{{node1Url}}"],
           "path": ["chain"]
         },
         "description": "GET /chain — a cadeia inteira em JSON. O bloco 0 e o genesis (mesmo em todos os nos)."
@@ -100,8 +108,8 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/chain/validate",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/chain/validate",
+          "host": ["{{node1Url}}"],
           "path": ["chain", "validate"]
         },
         "description": "GET /chain/validate — recalcula o encadeamento e o Proof of Work de toda a cadeia. Se alguem mexer num bloco, isto vira false."
@@ -147,8 +155,8 @@
           }
         },
         "url": {
-          "raw": "{{baseUrl}}/transactions",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/transactions",
+          "host": ["{{node1Url}}"],
           "path": ["transactions"]
         },
         "description": "POST /transactions — coloca a transacao na mempool (a fila de espera). Ainda NAO virou bloco: ela so entra na cadeia quando alguem minerar."
@@ -193,8 +201,8 @@
           }
         },
         "url": {
-          "raw": "{{baseUrl}}/transactions",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/transactions",
+          "host": ["{{node1Url}}"],
           "path": ["transactions"]
         },
         "description": "POST /transactions — a mempool aceita varias transacoes; todas as pendentes entram no proximo bloco minerado."
@@ -226,8 +234,8 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/transactions/pending",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/transactions/pending",
+          "host": ["{{node1Url}}"],
           "path": ["transactions", "pending"]
         },
         "description": "GET /transactions/pending — o conteudo da mempool. Note que as transacoes existem aqui, mas ainda NAO estao em nenhum bloco."
@@ -266,8 +274,8 @@
         "method": "POST",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/blocks/mine",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/blocks/mine",
+          "host": ["{{node1Url}}"],
           "path": ["blocks", "mine"]
         },
         "description": "POST /blocks/mine — minera com o que estiver na mempool e anexa o bloco a cadeia. Aqui o Proof of Work roda de verdade: na dificuldade 4 leva ~1 segundo (por isso DIFFICULTY=2 no teste manual).\n\nSe responder 409, a cadeia avancou durante a mineracao: as transacoes continuam pendentes, basta minerar de novo."
@@ -294,8 +302,8 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/transactions/pending",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/transactions/pending",
+          "host": ["{{node1Url}}"],
           "path": ["transactions", "pending"]
         },
         "description": "GET /transactions/pending — depois da mineracao a fila fica vazia: as transacoes passaram de 'pendentes' para 'dentro do bloco 1'."
@@ -336,8 +344,8 @@
           }
         },
         "url": {
-          "raw": "{{baseUrl}}/transactions",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/transactions",
+          "host": ["{{node1Url}}"],
           "path": ["transactions"]
         },
         "description": "POST /transactions com From vazio — a API valida a entrada e recusa com 400 (a transacao NAO entra na mempool).\n\nOutros casos que tambem dao 400: To vazio e Amount <= 0 (teste trocando o corpo)."
@@ -374,11 +382,43 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/chain",
-          "host": ["{{baseUrl}}"],
+          "raw": "{{node1Url}}/chain",
+          "host": ["{{node1Url}}"],
           "path": ["chain"]
         },
         "description": "GET /chain — confere o encadeamento de ponta a ponta: e essa verificacao de 'previousHash de um == hash do outro' que faz a cadeia ser a cadeia."
+      }
+    },
+
+    {
+      "name": "11. Peers configurados (etapa 6)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('identifica o no', () => pm.expect(r.node).to.be.a('string'));",
+              "pm.test('peers e uma lista (vazia em no isolado)', () => pm.expect(r.peers).to.be.an('array'));",
+              "pm.test('cada peer e uma URL http(s) absoluta', () => {",
+              "    r.peers.forEach((peer) => pm.expect(peer.startsWith('http')).to.be.true);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{node1Url}}/peers",
+          "host": ["{{node1Url}}"],
+          "path": ["peers"]
+        },
+        "description": "GET /peers — os peers configurados por PEERS: e para esses enderecos que o POST /blocks/mine faz push do bloco novo (POST /blocks/receive). Com os 3 containers, o node1 responde http://node2:8080 e http://node3:8080; sem PEERS a lista vem vazia."
       }
     }
   ]
