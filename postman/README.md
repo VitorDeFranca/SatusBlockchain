@@ -18,6 +18,13 @@ No terminal aparece `Now listening on: http://localhost:5165`.
 
 > Use `DIFFICULTY=2` para testar no Postman: um bloco é minerado em milissegundos.
 > Se mudar para 4, ajuste também a variável `difficulty` do collection.
+>
+> **Com Docker (etapa 5):** suba os 3 nós com `docker compose up -d` (em vez do `dotnet run`)
+> e troque a variável `baseUrl` do collection para o nó que quiser testar:
+> `http://localhost:8080` (node1), `http://localhost:8081` (node2) ou
+> `http://localhost:8082` (node3). A dificuldade dos containers vem de `NODE_DIFFICULTY`
+> (padrão 2) — mantenha `difficulty = 2` no collection, ou suba com
+> `$env:NODE_DIFFICULTY = "4"; docker compose up -d --force-recreate` e ajuste a variável.
 
 ## 2. Importe o collection
 

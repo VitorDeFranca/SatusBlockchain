@@ -1,0 +1,76 @@
+# Etapa 5: três nós independentes da SatusBlockchain, um container cada.
+#
+#   docker compose up --build -d     # sobe os 3 (builda a imagem se necessário)
+#   docker compose ps                # estado, saúde e portas
+#   docker compose logs -f node1     # log de um nó
+#   docker compose down              # derruba tudo
+#
+# Dificuldade do PoW: os containers usam NODE_DIFFICULTY do ambiente, com padrão 2
+# (mineração em milissegundos). Para demonstrar o custo do Proof of Work:
+#   $env:NODE_DIFFICULTY = "4"; docker compose up -d --force-recreate   # ~1s por bloco
+# O nome é diferente de DIFFICULTY de propósito: o README manda usar $env:DIFFICULTY
+# para o `dotnet run`, e uma variável "esquecida" no shell mudaria a dificuldade dos
+# containers sem querer (foi exatamente o que aconteceu durante os testes desta etapa:
+# os nós subiram com dificuldade 6, herdada de um teste anterior de PoW).
+#
+# Rede interna: cada nó é resolvido pelo NOME DO SERVIÇO
+#   http://node1:8080   http://node2:8080   http://node3:8080
+# É esse endereço que a Etapa 6 vai usar como peer (PEERS=...).
+# Do host, o acesso é por localhost:8080 (node1), :8081 (node2), :8082 (node3).
+#
+# Os três serviços são idênticos exceto por NODE_ID e pela porta publicada no
+# host: é a mesma imagem rodando 3 vezes, com estado em memória separado.
+
+name: satusblockchain
+
+services:
+  node1:
+    build:
+      context: .
+      dockerfile: src/SatusBlockchain.Node/Dockerfile
+    image: satus-node:local
+    container_name: node1
+    environment:
+      NODE_ID: node1
+      # NODE_DIFFICULTY (padrão 2 = mineração em ms); nome próprio para não herdar
+      # a variável DIFFICULTY usada pelo `dotnet run` no mesmo shell.
+      DIFFICULTY: "${NODE_DIFFICULTY:-2}"
+    ports:
+      - "8080:8080"
+    networks:
+      - satus-net
+    restart: unless-stopped
+
+  node2:
+    build:
+      context: .
+      dockerfile: src/SatusBlockchain.Node/Dockerfile
+    image: satus-node:local
+    container_name: node2
+    environment:
+      NODE_ID: node2
+      DIFFICULTY: "${NODE_DIFFICULTY:-2}"
+    ports:
+      - "8081:8080"
+    networks:
+      - satus-net
+    restart: unless-stopped
+
+  node3:
+    build:
+      context: .
+      dockerfile: src/SatusBlockchain.Node/Dockerfile
+    image: satus-node:local
+    container_name: node3
+    environment:
+      NODE_ID: node3
+      DIFFICULTY: "${NODE_DIFFICULTY:-2}"
+    ports:
+      - "8082:8080"
+    networks:
+      - satus-net
+    restart: unless-stopped
+
+networks:
+  satus-net:
+    driver: bridge

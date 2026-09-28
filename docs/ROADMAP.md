@@ -12,7 +12,7 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 | 2 | Cadeia e genesis | `Blockchain`, genesis block, `IsValid()`, testes | Encadeamento, detecção de adulteração, base do estado replicado | ✅ |
 | 3 | Proof of Work | `ProofOfWork`, dificuldade configurável, testes | Custo computacional, resistência à reescrita do histórico | ✅ |
 | 4 | API REST (nó único) | Endpoints: chain, transactions, mine (sem peers) | Nó como serviço autônomo, contrato de comunicação | ✅ |
-| 5 | Docker + Compose | Dockerfile, compose com 3 nós isolados | Processos independentes, redes, configuração por ambiente | ⬜ |
+| 5 | Docker + Compose | `Dockerfile` multi-stage, `docker-compose.yml` com 3 nós isolados | Processos independentes, redes, configuração por ambiente | ✅ |
 | 6 | Propagação (push) | `PeerClient`, broadcast no mine, `/blocks/receive` | Comunicação nó-a-nó, replicação de estado, tolerância a peer offline | ⬜ |
 | 7 | Consenso e sync (pull) | Longest chain rule, `/sync`, substituição de cadeia (reorg) | Consenso, consistência eventual, recuperação após falha | ⬜ |
 | 8 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
@@ -32,6 +32,22 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   Antes ele era apenas lido e reportado pelo `GET /` — a cadeia minerava sempre na
   dificuldade padrão (4), o que quebrava o conceito de "configuração por ambiente"
   da etapa 5. Regressão coberta por `ApiTests.DifficultyDoAmbiente_ChegaNaCadeia`.
+- Etapa 5 (containers): uma imagem (`satus-node:local`), construída por um `Dockerfile`
+  multi-stage (`sdk:10.0` compila, `aspnet:10.0` executa), rodada 3 vezes com `NODE_ID`
+  e porta diferentes. O container escuta na 8080; o host publica 8080/8081/8082. Na rede
+  `satus-net` cada nó responde por `http://nodeN:8080` (DNS interno do Docker) — verificado
+  com `docker compose exec node2 curl -s http://node1:8080/`, que é exatamente o endereço
+  que a etapa 6 usará como `PEERS`.
+- Etapa 5 **sem mudança de código C#**: o `GET /` da etapa 4 já serve de healthcheck
+  (`curl -fsS http://localhost:8080/`) e o `Dockerfile` apenas publica a aplicação.
+  O `Dockerfile` e o `docker-compose.yml` foram escritos para a forma como os nós vão
+  conversar (porta 8080 + nome de serviço), não para o estado atual.
+- Armadilha encontrada e resolvida na etapa 5: a dificuldade dos containers vinha de
+  `${DIFFICULTY:-2}`, então os três nós subiram com **dificuldade 6** herdada de um
+  `$env:DIFFICULTY` deixado no shell por um teste de PoW anterior — nada no compose
+  indicava essa herança. Agora a variável de interpolação é `NODE_DIFFICULTY` (exclusiva
+  do compose), o que mantém a configuração por ambiente sem colidir com o `DIFFICULTY`
+  que o README manda usar no `dotnet run`.
 - A API (etapa 4) vem antes do Docker (etapa 5): depurar um nó via `dotnet run`
   é muito mais rápido que dentro de container.
 - O desacoplamento push (etapa 6) / pull (etapa 7) permite demonstrar primeiro a

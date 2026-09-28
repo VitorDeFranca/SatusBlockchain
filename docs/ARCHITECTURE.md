@@ -31,6 +31,25 @@ cópia da blockchain em memória e se comunica com os demais por HTTP/REST.
 └───────────────────────────────────────────────┘
 ```
 
+### Implantação com Docker Compose (etapa 5)
+
+Uma **única imagem** (`satus-node:local`), construída por um `Dockerfile` multi-stage —
+`sdk:10.0` no estágio de build (compila e publica) e `aspnet:10.0` no estágio final
+(só o runtime + o app publicado) — executada 3 vezes, cada uma com seu `NODE_ID`.
+Cada container é um processo isolado, com seu próprio estado em memória.
+
+| Serviço | `NODE_ID` | Porta no host | Endereço interno (usado pelos peers) |
+|---------|-----------|---------------|--------------------------------------|
+| `node1` | `node1` | `localhost:8080` | `http://node1:8080` |
+| `node2` | `node2` | `localhost:8081` | `http://node2:8080` |
+| `node3` | `node3` | `localhost:8082` | `http://node3:8080` |
+
+Na rede bridge `satus-net`, o **nome do serviço resolve para o container** (DNS interno do
+Docker): é esse endereço que as etapas 6 (push) e 7 (pull/`/sync`) usam para falar nó a nó.
+O container escuta na 8080 (padrão das imagens ASP.NET desde o .NET 8);
+o `HEALTHCHECK` bate em `GET /`, então `docker compose ps` mostra `healthy` quando o nó
+está de fato pronto (e não apenas com a porta aberta).
+
 ## 2. Estrutura de diretórios
 
 ```
@@ -45,12 +64,13 @@ SatusBlockchain/
 │       ├── Networking/        # PeerClient (comunicação de saída com outros nós)
 │       ├── Api/               # endpoints Minimal API agrupados por recurso
 │       ├── Program.cs         # composição da aplicação (DI, mapeamento de endpoints)
-│       └── Dockerfile         # (etapa 5)
+│       └── Dockerfile         # imagem do nó (build multi-stage)
 ├── tests/
 │   └── SatusBlockchain.Node.Tests/
 │       ├── Unit/               # domínio isolado (sem rede, sem processo)
 │       └── Integration/        # sobe o nó e conversa por HTTP
-├── docker-compose.yml         # (etapa 5)
+├── .dockerignore              # contexto de build enxuto (sem bin/obj/docs/tests)
+├── docker-compose.yml         # os 3 nós (node1, node2, node3)
 ├── SatusBlockchain.sln
 └── README.md
 ```
@@ -139,7 +159,12 @@ recebimento via push). Locks simples são suficientes no volume didático do pro
 | `NODE_ID` | `node1` | Identificador amigável (logs e respostas) |
 | `PEERS` | `http://node2:8080,http://node3:8080` | Lista estática de peers |
 | `DIFFICULTY` | `4` | Zeros hexadecimais exigidos no PoW |
-| `ASPNETCORE_URLS` | `http://+:8080` | Porta HTTP do nó |
+| `ASPNETCORE_HTTP_PORTS` | `8080` | Porta HTTP do nó (definida no `Dockerfile`) |
+
+No `docker-compose.yml`, a dificuldade dos três containers vem de `NODE_DIFFICULTY`
+(padrão 2 = mineração em milissegundos; use 4 para mostrar o custo do PoW). O nome é
+exclusivo do compose de propósito: um `DIFFICULTY` deixado no shell (usado pelo
+`dotnet run`) não pode mais alterar os containers sem querer.
 
 ## 10. Alternativas consideradas e descartadas
 

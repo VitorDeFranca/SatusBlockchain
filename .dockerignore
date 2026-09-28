@@ -1,0 +1,24 @@
+# Contexto de build da imagem do nó: só o necessário para compilar (src/).
+# Sem este arquivo, bin/ e obj/ da sua máquina iriam para dentro da build —
+# lento e inútil, porque o `dotnet restore` acontece lá dentro do container.
+
+**/bin/
+**/obj/
+**/TestResults/
+
+# Repositório / IDE / documentação / testes: não entram na imagem do nó
+.git/
+.gitignore
+.vs/
+.vscode/
+.idea/
+.clinerules/
+docs/
+postman/
+tests/
+*.md
+
+# Infraestrutura (lida pelo Docker/Compose, não precisa estar no contexto)
+Dockerfile*
+.dockerignore
+docker-compose*.yml
