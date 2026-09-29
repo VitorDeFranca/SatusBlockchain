@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "3f7c1b90-6c4a-4f2e-9a10-8d5b2e7c4a11",
-    "name": "SatusBlockchain - no unico (Etapa 4)",
-    "description": "Roteiro manual da Etapa 4 (API REST do no unico).\n\nANTES DE COMECAR:\n1. Suba o no com DIFFICULTY=4.\n2. Confira a variavel node1Url (padrao http://localhost:8080).\n3. Se mudar a DIFFICULTY, atualize a variavel difficulty (ela e usada no teste de Proof of Work).\n\nORDEM: execute os requests de 1 a 8. Para rodar tudo de uma vez com os testes automatizados, use o Collection Runner (botao 'Run').",
+    "name": "SatusBlockchain",
+    "description": "API collection da blockchain didática SatusBlockchain.\n\nANTES DE COMECAR:\n1. Suba o no com DIFFICULTY=4.\n2. Confira a variavel node1Url (padrao http://localhost:8080).\n3. Se mudar a DIFFICULTY, atualize a variavel difficulty (ela e usada no teste de Proof of Work).\n\nORDEM: execute os requests de 1 a 8. Para rodar tudo de uma vez com os testes automatizados, use o Collection Runner (botao 'Run').",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -419,6 +419,53 @@
           "path": ["peers"]
         },
         "description": "GET /peers — os peers configurados por PEERS: e para esses enderecos que o POST /blocks/mine faz push do bloco novo (POST /blocks/receive). Com os 3 containers, o node1 responde http://node2:8080 e http://node3:8080; sem PEERS a lista vem vazia."
+      }
+    },
+
+    {
+      "name": "12. Receber transacao propagada",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 (aceita) ou 409 (ja estava na mempool: dedup)', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));",
+              "",
+              "const r = pm.response.json();",
+              "if (pm.response.code === 200) {",
+              "    pm.test('confirma que entrou na mempool local', () => pm.expect(r.accepted).to.be.true);",
+              "    pm.test('informa quantas transacoes estao pendentes', () => pm.expect(r.pending).to.be.at.least(1));",
+              "} else {",
+              "    pm.test('a recusa vem explicada (duplicada ou ja confirmada)', () => pm.expect(r.accepted).to.be.false);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"from\": \"alice\",\n  \"to\": \"bob\",\n  \"amount\": 25\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{node1Url}}/transactions/receive",
+          "host": ["{{node1Url}}"],
+          "path": ["transactions", "receive"]
+        },
+        "description": "POST /transactions/receive — o endpoint que um PEER chama (nao o cliente): e aqui que o gossip da etapa 7 entrega a transacao. 200 = entrou na mempool local; 409 = ja estava pendente (dedup) ou ja esta confirmada em um bloco."
       }
     }
   ]
