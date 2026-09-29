@@ -51,7 +51,9 @@ com seu namespace, o que permite rodar só um conjunto pelo filtro:
 - **Integração** (`tests/SatusBlockchain.Node.Tests/Integration`): sobe o executável do nó em
   uma porta livre e conversa por HTTP — valida rotas, status codes, JSON, `NODE_ID`/`DIFFICULTY`
   do ambiente e o fluxo mempool → bloco. Na etapa 6, `PropagationTests` liga 2–3 nós por
-  `PEERS` para cobrir o push (bloco propagado, duplicado, adulterado, órfão e peer offline).
+  `PEERS` para cobrir o push (bloco propagado, duplicado, adulterado, órfão e peer offline) e,
+  na etapa 7, `TransactionPropagationTests` cobre o gossip (transação que nasce em um nó e é
+  minerada em outro, dedup e transação já confirmada).
   Um processo novo por teste (isolamento total).
 
 ### Uso da API
@@ -85,8 +87,9 @@ curl http://localhost:5165/chain/validate
 | `GET /` | Identidade, dificuldade, tamanho e validade da cadeia |
 | `GET /chain` | Cadeia completa do nó |
 | `GET /chain/validate` | Valida encadeamento, hashes e Proof of Work |
-| `POST /transactions` | Adiciona transação à mempool |
-| `GET /transactions/pending` | Transações aguardando mineração |
+| `POST /transactions` | Adiciona transação à mempool **e propaga aos peers** (gossip) |
+| `GET /transactions/pending` | Transações aguardando mineração (**visão local** do nó) |
+| `POST /transactions/receive` | Recebe uma transação propagada (**200** aceita · **409** duplicada ou já confirmada) |
 | `POST /blocks/mine` | Minera um bloco com a mempool e propaga aos peers (push) |
 | `POST /blocks/receive` | Recebe um bloco propagado (**200** aceito · **409** se não estende a cadeia) |
 | `GET /peers` | Peers configurados (`PEERS`) — o destino do push |
@@ -159,7 +162,7 @@ O push é **aguardado** antes de o mine responder (e os envios são paralelos): 
 determinística. Quem envia aparece no log:
 
 ```powershell
-docker compose logs -f node1         # "Bloco 1 propagado para http://node2:8080", ...
+docker compose logs -f node1         # "Peer http://node2:8080 aceitou Bloco 1 (200)", ...
 ```
 
 **Tolerância a peer offline** — derrube um nó e minere de novo:
@@ -175,10 +178,43 @@ curl http://localhost:8082/                        # blocks = 1: voltou ao genes
 **O que ainda *não* acontece (e é esperado nesta etapa):** o nó que estava fora **não** se
 recupera sozinho. Ele recebe os próximos blocos, mas os recusa com **409** — eles não
 encaixam na cadeia dele (índice/elo fora de sequência). É exatamente a lacuna que o
-`POST /sync` da etapa 7 fecha (longest chain rule + reorg).
+`POST /sync` da etapa 8 fecha (longest chain rule + reorg).
 
 > Duplicidade e adulteração são recusadas na porta de entrada: reenviar o mesmo bloco, ou
 > postar o bloco com o conteúdo trocado, responde **409** e não mexe na cadeia —
 > `Blockchain.AddBlock` recalcula o hash e valida o Proof of Work antes de anexar.
+
+## Etapa 7: gossip de transações
+
+A mempool **não** é compartilhada entre os nós (em blockchain nenhuma): cada nó tem a sua, e o
+que existe entre eles é o repasse. Ao aceitar uma transação, o nó a propaga aos peers
+(`POST /transactions/receive`) — então postar em **um** nó basta para que qualquer outro possa
+incluí-la em um bloco. É assim que uma carteira real funciona: ela fala com um nó e conta com
+a rede.
+
+```powershell
+# a "carteira" fala com UM nó
+curl -X POST http://localhost:8080/transactions `
+  -H "Content-Type: application/json" -d '{"from":"alice","to":"bob","amount":25}'
+
+curl http://localhost:8082/transactions/pending   # o node3 já tem a transação pendente
+
+# e o bloco pode ser minerado em OUTRO nó:
+curl -X POST http://localhost:8082/blocks/mine    # o node3 mina a transação que nasceu no node1
+curl http://localhost:8080/chain                  # o bloco do node3 chega ao node1 pelo push
+```
+
+Regras de quem recebe (`/transactions/receive`): **409** se a transação já está pendente
+(dedup — a fila nunca guarda a mesma transação duas vezes) ou se ela já está **confirmada** em
+um bloco (o bloco pode ter chegado antes). Já o `POST /transactions` continua respondendo
+**201** para quem postou: reenviar não é erro do cliente.
+
+**O que ainda *não* acontece:** quando um bloco novo chega, cada nó poda da própria mempool as
+transações que ele confirma — mas um nó que ficou **offline** continua sem as transações e sem
+os blocos que perdeu, até alguém sincronizá-lo (`POST /sync`, etapa 8).
+
+> Conceito para a apresentação: na mempool **não há consenso**. Dois nós podem ter filas
+> diferentes e concordar 100% na cadeia — quem resolve conflito é o bloco (é por isso que
+> carteira de verdade só confia em transação confirmada).
 
 O roadmap completo (propagação, consenso e forks) está em [docs/ROADMAP.md](docs/ROADMAP.md).

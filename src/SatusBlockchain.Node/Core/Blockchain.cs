@@ -97,6 +97,19 @@ public class Blockchain
             return TryAppend(candidate) ? candidate : null;
     }
 
+    /// <summary>
+    /// A transação já está confirmada em algum bloco da cadeia?
+    ///
+    /// Usado pelo gossip (etapa 7): o bloco pode chegar ANTES da transação, dependendo de
+    /// quem responde primeiro. Sem esta checagem, uma transação já confirmada voltaria a
+    /// ficar "pendente para sempre" na mempool local.
+    /// </summary>
+    public bool ContainsTransaction(Transaction transaction)
+    {
+        lock (_lock)
+            return _chain.Any(block => block.Transactions.Contains(transaction));
+    }
+
     /// <summary>Exige o lock adquirido. Encadeia e anexa o bloco, se válido.</summary>
     private bool TryAppend(Block block)
     {

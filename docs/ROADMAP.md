@@ -14,15 +14,16 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 | 4 | API REST (nó único) | Endpoints: chain, transactions, mine (sem peers) | Nó como serviço autônomo, contrato de comunicação | ✅ |
 | 5 | Docker + Compose | `Dockerfile` multi-stage, `docker-compose.yml` com 3 nós isolados | Processos independentes, redes, configuração por ambiente | ✅ |
 | 6 | Propagação (push) | `PeerClient`, broadcast no mine, `/blocks/receive` | Comunicação nó-a-nó, replicação de estado, tolerância a peer offline | ✅ |
-| 7 | Consenso e sync (pull) | Longest chain rule, `/sync`, substituição de cadeia (reorg) | Consenso, consistência eventual, recuperação após falha | ⬜ |
-| 8 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
-| 9 | Fechamento | README final, docs atualizados, roteiro de apresentação | — | ⬜ |
+| 7 | Gossip de transações | `PeerClient.BroadcastTransactionAsync`, `/transactions/receive`, dedup na mempool | Replicação em duas camadas: mempool (estado local, sem consenso) x cadeia | ✅ |
+| 8 | Consenso e sync (pull) | Longest chain rule, `/sync`, substituição de cadeia (reorg) | Consenso, consistência eventual, recuperação após falha | ⬜ |
+| 9 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
+| 10 | Fechamento | README final, docs atualizados, roteiro de apresentação | — | ⬜ |
 
 ## Notas de ordenação
 
-- Testes acompanham as etapas 1–6 (não são etapa separada): **unidade** para o domínio e para
-  o `PeerClient` (etapas 1–3 e 6) e **integração HTTP** para a API (etapas 4 e 6), subindo o nó
-  real em um processo isolado, em porta livre.
+- Testes acompanham as etapas 1–7 (não são etapa separada): **unidade** para o domínio e para
+  o `PeerClient` (etapas 1–3, 6 e 7) e **integração HTTP** para a API (etapas 4, 6 e 7),
+  subindo o nó real em um processo isolado, em porta livre.
 - Os testes ficam em **um projeto só** (`tests/SatusBlockchain.Node.Tests`), com uma pasta
   por tipo: `Unit/` (domínio isolado, sem rede) e `Integration/` (sobe o nó e conversa por
   HTTP). Os namespaces `…Tests.Unit` / `…Tests.Integration` permitem rodar só um conjunto:
@@ -51,8 +52,12 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   que o README manda usar no `dotnet run`.
 - A API (etapa 4) vem antes do Docker (etapa 5): depurar um nó via `dotnet run`
   é muito mais rápido que dentro de container.
-- O desacoplamento push (etapa 6) / pull (etapa 7) permite demonstrar primeiro a
+- O desacoplamento push (etapa 6) / pull (etapa 8) permite demonstrar primeiro a
   propagação "feliz" e só depois falhas, recuperação e consenso.
+- O gossip de transações (etapa 7) vem **entre** o push e o pull de propósito: é a mesma
+  natureza da etapa 6 (plano de propagação, sem longest chain rule) e responde a uma pergunta
+  que aparece sempre em aula — "a mempool é compartilhada entre os nós?" (não é: cada nó tem a
+  sua, e o que existe é o repasse). Por isso o `/sync` deixou de ser a etapa 7: virou a **8**.
 - Etapa 6 (push): `Networking/PeerClient` envia o bloco minerado a cada peer em **paralelo**
   (`POST /blocks/receive`) e o `POST /blocks/mine` **aguarda** o push antes de responder —
   decisão que torna demo e testes determinísticos: quando o mine responde, os peers já têm
@@ -88,13 +93,35 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   mão (sem Moq — o projeto não tem pacote de mock) para verificar, de forma
   determinística, que todo peer recebe o bloco, que 409 é reportado como "não aceito" sem
   exceção e que um peer inacessível não impede o envio aos demais.
+- Etapa 7 (gossip de transações): `POST /transactions` grava na mempool local **e** propaga
+  aos peers (`POST /transactions/receive`) — a transação postada em UM nó pode ser minerada em
+  qualquer outro, que é o fluxo real (a carteira fala com um nó e conta com a propagação).
+  É a segunda malha de replicação: **mempool = estado local + gossip (sem consenso)** x
+  **cadeia = consenso (longest chain, etapa 8)**.
+- Etapa 7 (dedup): `Mempool.Add` passou a devolver `bool` e a ignorar repetida (`Transaction` é
+  record: igualdade por valor). Sem isso, com três escritores possíveis na mesma fila (o
+  cliente e dois peers), a mesma transação ocuparia a fila várias vezes e poderia entrar
+  repetida em um bloco.
+- Etapa 7 (transação já confirmada): `Blockchain.ContainsTransaction` + checagem em
+  `/transactions/receive`. O bloco pode chegar ANTES da transação (basta o peer do bloco
+  responder primeiro); sem a checagem, a transação confirmada voltaria a ficar "pendente para
+  sempre" e poderia ser minerada de novo. A recusa é **409** (mesma semântica do bloco
+  duplicado), com mensagem distinguindo "já confirmada" de "já pendente".
+- Etapa 7 (contrato): o cliente continua recebendo **201 Created** mesmo repetindo a transação
+  (reenviar não é erro de quem postou — e não há reanúncio, porque os peers já foram avisados
+  na primeira vez); o **409** fica do lado do peer, que é quem reenvia algo que já temos. Como
+  na etapa 6, o gossip é **aguardado** antes de responder, para demo e testes determinísticos.
+- Etapa 7 (escopo): gossip de **1 hop** (o receptor não re-propaga: com `PEERS` completos, um
+  hop alcança os três nós) e sem taxa, priorização, evicção ou expiração — o foco é o conceito
+  de replicação de estado, não política de mempool.
 
 ## Cenário de demonstração final (referência para as etapas)
 
 1. `docker compose up` com 3 nós;
-2. criar transações e minerar no node1 → bloco propaga para node2 e node3;
+2. criar transações em **qualquer** nó (o gossip da etapa 7 leva aos demais) e minerar no
+   node1 → o bloco propaga para node2 e node3;
 3. validar a cadeia em todos os nós;
 4. derrubar o node3, minerar mais blocos nos demais;
-5. religar o node3 e sincronizá-lo (`POST /sync`);
+5. religar o node3 e sincronizá-lo (`POST /sync`, etapa 8);
 6. provocar um fork (isolar node3, minerar em ambos os lados);
 7. religar e observar a convergência pela longest chain rule.

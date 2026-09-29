@@ -243,4 +243,38 @@ public class BlockchainTests
         }
     }
     #endregion
+
+    #region Consultas
+
+    [Fact]
+    public void ContainsTransaction_TransacaoJaMinerada_DevolveTrue()
+    {
+        // Caso real do gossip (etapa 7): o bloco pode chegar ANTES da transação.
+        var blockchain = new Blockchain(difficulty: 0);
+        var transacao = new Transaction("alice", "bob", 10m);
+        blockchain.AddBlock(CreateMinedNextBlock(blockchain, transacao));
+
+        Assert.True(blockchain.ContainsTransaction(transacao));
+    }
+
+    [Fact]
+    public void ContainsTransaction_TransacaoAindaNaoMinerada_DevolveFalse()
+    {
+        var blockchain = new Blockchain(difficulty: 0);
+
+        Assert.False(blockchain.ContainsTransaction(new Transaction("alice", "bob", 10m)));
+    }
+
+    [Fact]
+    public void ContainsTransaction_ProcuradaPorValor_NaoPorReferencia()
+    {
+        // Transaction é record: uma instância NOVA com os mesmos dados é a mesma transação.
+        var blockchain = new Blockchain(difficulty: 0);
+        blockchain.AddBlock(CreateMinedNextBlock(blockchain, new Transaction("alice", "bob", 10m)));
+
+        Assert.True(blockchain.ContainsTransaction(new Transaction("alice", "bob", 10m)));
+        Assert.False(blockchain.ContainsTransaction(new Transaction("alice", "bob", 10.01m)));
+    }
+
+    #endregion
 }

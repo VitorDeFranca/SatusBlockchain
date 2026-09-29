@@ -39,7 +39,7 @@ O collection já tem as variáveis:
 | `baseUrl` | `http://localhost:5165` | endereço do nó |
 | `difficulty` | `2` | testar o Proof of Work (`hash` começa com N zeros) |
 
-## 3. Execute na ordem 1 → 11
+## 3. Execute na ordem 1 → 12
 
 | # | Request | O que observar |
 |---|---------|----------------|
@@ -54,6 +54,7 @@ O collection já tem as variáveis:
 | 9 | `POST /transactions` (inválida) | **400 Bad Request** (`from` vazio, `amount <= 0`, etc.) |
 | 10 | `GET /chain` | cadeia com 2 blocos: cada `previousHash` igual ao `hash` do anterior |
 | 11 | `GET /peers` | peers configurados (`PEERS`) — vazio no `dotnet run` sem `PEERS`; com Docker, `http://node2:8080` e `http://node3:8080` |
+| 12 | `POST /transactions/receive` | entrega a transação como um **peer** faria (gossip): **200** entra na mempool; rodando de novo, **409** (dedup) |
 
 ## 4. Propagação entre os nós (etapa 6)
 
@@ -77,11 +78,18 @@ docker compose logs -f node1
 respondendo **200** — a mineração local não depende dos peers — e o log mostra
 `Peer http://node3:8080 inacessível`. Ao religar (`docker compose start node3`), o node3
 volta ao genesis e **não** se recupera sozinho: ele recusa os blocos seguintes com **409**
-(índice/elo fora de sequência). É exatamente o que o `POST /sync` da etapa 7 resolve.
+(índice/elo fora de sequência). É exatamente o que o `POST /sync` da etapa 8 resolve.
 
 **Reenvio e adulteração:** `POST /blocks/receive` com um bloco que o nó já tem — ou com o
 conteúdo alterado — responde **409** e não mexe na cadeia. Para testar, copie um bloco de
 `GET /chain` de um nó e cole no corpo de `POST {{baseUrl}}/blocks/receive` do outro.
+
+**Gossip de transações:** postar a transação no `node1` (request 4) a faz aparecer em
+`GET /transactions/pending` (request 6) do `node2` e do `node3` — cada nó com a **sua** mempool,
+alimentada pelo repasse. E o bloco pode ser minerado em **outro** nó: troque `baseUrl` para
+`http://localhost:8082` antes do request 7 e a transação que nasceu no node1 entra no bloco
+minerado pelo node3. A request 12 entrega uma transação direto no endpoint de gossip, como um
+peer faria (rodando duas vezes, a segunda responde 409 por dedup).
 
 ## 5. Rodar tudo de uma vez (Collection Runner)
 
@@ -129,4 +137,5 @@ Invoke-RestMethod "$base/blocks/mine" -Method Post | Format-List
 | `POST /blocks/mine` retorna **409** | a cadeia mudou durante a mineração (outro bloco entrou). É proposital: as transações continuam na memória; mine de novo |
 | Teste do PoW falhando | variável `difficulty` do collection diferente do `DIFFICULTY` do nó |
 | `POST /blocks/receive` retorna **409** | o bloco não estende a cadeia local: duplicado (já está na cadeia), órfão (índice fora de sequência — nó que ficou para trás) ou adulterado (hash/PoW não conferem) |
-| Bloco minerado não aparece no outro nó | o nó não tem o peer em `PEERS` (veja `GET /peers`), os nós estão com **dificuldades diferentes**, ou o outro nó reiniciou e voltou ao genesis — nesse caso ele recusa tudo com 409 até o `POST /sync` da etapa 7 |
+| Bloco minerado não aparece no outro nó | o nó não tem o peer em `PEERS` (veja `GET /peers`), os nós estão com **dificuldades diferentes**, ou o outro nó reiniciou e voltou ao genesis — nesse caso ele recusa tudo com 409 até o `POST /sync` da etapa 8 |
+| `POST /transactions/receive` retorna **409** | a transação já está pendente na mempool local (dedup) ou já está **confirmada** em um bloco — nenhum dos dois é erro: é o gossip chegando duas vezes |

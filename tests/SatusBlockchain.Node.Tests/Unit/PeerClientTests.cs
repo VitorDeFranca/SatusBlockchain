@@ -92,6 +92,43 @@ public class PeerClientTests
         Assert.True(aceito.Accepted);
     }
 
+    [Fact]
+    public async Task BroadcastTransaction_EnviaParaTodosOsPeers_NoEndpointDeRecebimento()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        using var http = new HttpClient(handler);
+        var client = new PeerClient(http, Options("http://node2:8080", "http://node3:8080"),
+            NullLogger<PeerClient>.Instance);
+
+        var results = await client.BroadcastTransactionAsync(new Transaction("alice", "bob", 10m));
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.All(handler.Requests, request =>
+        {
+            Assert.EndsWith("/transactions/receive", request.Url);
+
+            // A transação vai CRUA no corpo (camelCase), como em POST /transactions.
+            var transacao = JsonSerializer.Deserialize<Transaction>(request.Body, WebJson);
+            Assert.Equal(new Transaction("alice", "bob", 10m), transacao);
+        });
+        Assert.All(results, result => Assert.True(result.Accepted));
+    }
+
+    [Fact]
+    public async Task BroadcastTransaction_PeerInacessivel_NaoLancaExcecao()
+    {
+        // Propagar não pode fazer o POST /transactions falhar: a transação já está na
+        // mempool local e o peer pode recebê-la depois (via bloco ou nova tentativa).
+        var handler = new StubHandler(_ => throw new HttpRequestException("conexão recusada"));
+        using var http = new HttpClient(handler);
+        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance);
+
+        var result = Assert.Single(await client.BroadcastTransactionAsync(new Transaction("alice", "bob", 10m)));
+
+        Assert.False(result.Accepted);
+        Assert.Equal("inacessível", result.Detail);
+    }
+
     private static NodeOptions Options(params string[] peers) => new("node-test", 2, peers);
 
     private static Block Block() => new()

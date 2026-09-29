@@ -58,4 +58,29 @@ public class MempoolTests
 
         Assert.Equal(quantidade, mempool.GetPending().Count);
     }
+
+    [Fact]
+    public void Add_TransacaoRepetida_NaoDuplicaNaFila()
+    {
+        // Com o gossip (etapa 7) a mesma transação pode chegar pelo cliente e por um peer.
+        var mempool = new Mempool();
+        var transacao = new Transaction("alice", "bob", 10m);
+
+        Assert.True(mempool.Add(transacao));
+        Assert.False(mempool.Add(transacao)); // dedup: Transaction é record (igualdade por valor)
+
+        Assert.Single(mempool.GetPending());
+    }
+
+    [Fact]
+    public void Add_MesmoParComValorDiferente_EntraNaFila()
+    {
+        var mempool = new Mempool();
+        mempool.Add(new Transaction("alice", "bob", 10m));
+
+        var entrou = mempool.Add(new Transaction("alice", "bob", 11m));
+
+        Assert.True(entrou);
+        Assert.Equal(2, mempool.GetPending().Count);
+    }
 }

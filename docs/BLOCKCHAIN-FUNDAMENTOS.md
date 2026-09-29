@@ -271,10 +271,11 @@ distribuídos. O SatusBlockchain omite deliberadamente:
 | Mempool | `Core/Mempool.cs` | 4 |
 | Nó como serviço (REST) | `Api/*.cs` | 4 |
 | Nós independentes | `docker-compose.yml` (3 serviços) | 5 |
-| Propagação (push) | `Networking/PeerClient.cs`, `POST /blocks/receive` | 6 |
-| Consenso (longest chain) e reorg | `Blockchain.ReplaceChain()`, `POST /sync` | 7 |
-| Fork e convergência | roteiro de demonstração | 8 |
-| Consistência eventual e recuperação | demos das etapas 7–8 | 7–8 |
+| Propagação de blocos (push) | `Networking/PeerClient.cs`, `POST /blocks/receive` | 6 |
+| Gossip de transações (mempool local) | `Networking/PeerClient.cs`, `POST /transactions/receive` | 7 |
+| Consenso (longest chain) e reorg | `Blockchain.ReplaceChain()`, `POST /sync` | 8 |
+| Fork e convergência | roteiro de demonstração | 9 |
+| Consistência eventual e recuperação | demos das etapas 8–9 | 8–9 |
 
 ---
 

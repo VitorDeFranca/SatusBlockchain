@@ -2,17 +2,32 @@ namespace SatusBlockchain.Node.Core;
 
 /// <summary>
 /// Fila de transações pendentes: aguardam a próxima mineração para entrar em um bloco.
-/// Thread-safe por <c>lock</c>, pois pode ser alterada por requisições simultâneas.
+/// Thread-safe por <c>lock</c>, pois pode ser alterada por requisições simultâneas —
+/// na etapa 7 são DOIS escritores possíveis: o cliente (`POST /transactions`) e os
+/// peers (gossip, `POST /transactions/receive`).
 /// </summary>
 public class Mempool
 {
     private readonly List<Transaction> _pending = [];
     private readonly Lock _lock = new();
 
-    public void Add(Transaction transaction)
+    /// <summary>
+    /// Adiciona a transação à fila, **sem duplicar**: com o gossip, a mesma transação
+    /// pode chegar por caminhos diferentes (cliente e peers) e a fila deve continuar
+    /// com uma única cópia.
+    /// </summary>
+    /// <returns><c>true</c> se entrou na fila; <c>false</c> se já estava pendente.</returns>
+    public bool Add(Transaction transaction)
     {
         lock (_lock)
+        {
+            // Transaction é record: a comparação é por valor (From/To/Amount).
+            if (_pending.Contains(transaction))
+                return false;
+
             _pending.Add(transaction);
+            return true;
+        }
     }
 
     /// <summary>Cópia das transações pendentes — protege a fila interna.</summary>

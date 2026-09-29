@@ -84,8 +84,8 @@ SatusBlockchain/
 | `Hasher` | SHA-256 sobre a serialização canônica (JSON ordenado) do bloco | conhecer a cadeia |
 | `ProofOfWork` | Encontrar nonce que satisfaça a dificuldade; verificar nonce | decidir política de dificuldade |
 | `Blockchain` | Cadeia em memória: genesis, adição de bloco, validação, substituição (reorg) | falar HTTP |
-| `Mempool` | Fila FIFO de transações pendentes | priorização por taxa |
-| `PeerClient` | HTTP de saída: broadcast de bloco tolerante a peer offline (push, etapa 6) | consultar a cadeia dos peers (pull, etapa 7); regras de consenso |
+| `Mempool` | Fila FIFO de transações pendentes, com dedup por valor | priorização por taxa, evicção, expiração |
+| `PeerClient` | HTTP de saída tolerante a peer offline: push de bloco e gossip de transação | consultar a cadeia dos peers (pull, etapa 8); regras de consenso |
 | Endpoints | Exposição REST do nó | lógica de domínio |
 
 ## 4. Modelo de dados
@@ -137,7 +137,23 @@ gerar hashes diferentes em nós diferentes.
 - Não há emissor autenticado: quem recusa bloco ruim é a validação do domínio
   (hash recalculado + PoW), não a boa vontade do remetente.
 
-### Pull (sincronização) — etapa 7
+### Gossip de transações — etapa 7
+
+- `POST /transactions` grava na mempool local **e** propaga a transação aos peers
+  (`POST /transactions/receive`), aguardando o envio antes de responder (mesmo critério da
+  etapa 6: quando o 201 chega, os peers já têm a transação na fila deles).
+- A **mempool é local a cada nó** — não existe mempool compartilhada em blockchain nenhuma.
+  O que existe é o repasse: qualquer nó que minerar pode incluir a transação, porque todos a
+  receberam. É o fluxo de uma carteira real: ela fala com **um** nó e conta com a rede.
+- Dedup em `Mempool.Add` (transação repetida não ocupa a fila duas vezes) e
+  `Blockchain.ContainsTransaction` na recepção: se o bloco chegou **antes** da transação, ela
+  não volta para a fila (409 "já confirmada").
+- Ciclo que mantém as duas camadas coerentes: a transação nasce em um nó → gossip → entra em
+  um bloco em qualquer nó → o bloco faz push (etapa 6) → cada nó poda da própria mempool as
+  transações confirmadas.
+- Escopo: gossip de **1 hop** (o receptor não re-propaga) e sem taxa, priorização ou evicção.
+
+### Pull (sincronização) — etapa 8
 
 - `POST /sync` consulta `GET /chain` de cada peer e aplica a **longest chain rule**. É o
   mecanismo que recupera o nó que ficou offline: no push puro ele apenas recusa os blocos

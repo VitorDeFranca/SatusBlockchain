@@ -51,6 +51,8 @@ O projeto deve permitir demonstrar:
 | RF-11 | Em caso de empate de comprimento entre cadeias válidas, o nó mantém a cadeia local (regra "first seen"). |
 | RF-12 | Deve ser possível subir pelo menos 3 nós independentes com `docker compose up`. |
 | RF-13 | Peers são configurados estaticamente por variável de ambiente (`PEERS=http://node2:8080,...`). |
+| RF-14 | Ao aceitar uma transação, o nó deve propagá-la aos peers (gossip: `POST /transactions/receive`), para que **qualquer** nó possa incluí-la em um bloco. |
+| RF-15 | Um nó deve aceitar uma transação recebida somente se for válida, não estiver já pendente na mempool local e não estiver já confirmada na cadeia local. |
 
 ### Endpoints previstos
 
@@ -61,6 +63,7 @@ POST /transactions           → adiciona transação à mempool
 GET  /transactions/pending   → lista transações pendentes
 POST /blocks/mine            → minera bloco com a mempool e propaga aos peers
 POST /blocks/receive         → recebe bloco propagado por outro nó
+POST /transactions/receive   → recebe transação propagada por outro nó (gossip)
 POST /sync                   → sincroniza com peers (longest chain rule)
 GET  /peers                  → lista peers configurados
 ```
@@ -96,3 +99,4 @@ GET  /peers                  → lista peers configurados
 | Consenso | Longest chain rule; empate = mantém local (first seen) | Análogo simplificado ao consenso de Nakamoto |
 | Reorg | Transações de blocos órfãos retornam à mempool (exceto as já presentes na cadeia adotada) | Fiel ao Bitcoin; permite demonstrar finalidade probabilística |
 | Estilo de API | Minimal APIs organizadas por arquivos de extensão | Menos cerimônia que Controllers, mesma clareza |
+| Mempool compartilhada? | **Não** — cada nó tem a sua, e o que existe é o repasse (gossip, etapa 7) | Espelha Bitcoin/Ethereum: mempool é estado local, não consenso; sem gossip, a transação ficaria presa no nó onde foi postada |
