@@ -40,6 +40,7 @@ app.MapChainEndpoints();
 app.MapTransactionEndpoints();
 app.MapBlockEndpoints();
 app.MapPeerEndpoints();
+app.MapSyncEndpoints();
 
 app.Run();
 

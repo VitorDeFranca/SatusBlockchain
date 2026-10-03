@@ -15,7 +15,7 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 | 5 | Docker + Compose | `Dockerfile` multi-stage, `docker-compose.yml` com 3 nós isolados | Processos independentes, redes, configuração por ambiente | ✅ |
 | 6 | Propagação (push) | `PeerClient`, broadcast no mine, `/blocks/receive` | Comunicação nó-a-nó, replicação de estado, tolerância a peer offline | ✅ |
 | 7 | Gossip de transações | `PeerClient.BroadcastTransactionAsync`, `/transactions/receive`, dedup na mempool | Replicação em duas camadas: mempool (estado local, sem consenso) x cadeia | ✅ |
-| 8 | Consenso e sync (pull) | Longest chain rule, `/sync`, substituição de cadeia (reorg) | Consenso, consistência eventual, recuperação após falha | ⬜ |
+| 8 | Consenso e sync (pull) | `POST /sync`, longest chain rule, substituição de cadeia (reorg) | Consenso, consistência eventual, recuperação após falha | ✅ |
 | 9 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
 | 10 | Fechamento | README final, docs atualizados, roteiro de apresentação | — | ⬜ |
 
@@ -114,6 +114,28 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 - Etapa 7 (escopo): gossip de **1 hop** (o receptor não re-propaga: com `PEERS` completos, um
   hop alcança os três nós) e sem taxa, priorização, evicção ou expiração — o foco é o conceito
   de replicação de estado, não política de mempool.
+- Etapa 8 (pull): `POST /sync` lê `GET /chain` de cada peer em paralelo
+  (`PeerClient.GetChainsAsync`) e adota a cadeia **válida e estritamente mais longa**
+  (`Blockchain.TryReplaceChain`). O relatório diz o desfecho por peer — `Adopted` (adotou),
+  `Kept` (a local já era maior ou do mesmo tamanho), `Invalid` (quebrada ou de outro
+  "universo"), `Unreachable` (fora do ar) — e o endpoint responde **200 sempre**: peer ausente
+  é situação normal numa rede parcial, não erro de quem pediu.
+- Etapa 8 (três regras, nesta ordem): (1) **mesmo genesis** — dificuldade diferente gera outro
+  "universo", e o PoW de lá não valeria aqui; (2) **cadeia válida**, conferida **localmente**
+  (`IsValidChain`, o mesmo código do `IsValid`) — não confiamos no julgamento do peer;
+  (3) **estritamente mais longa** — empate mantém a local (regra "first seen"), para que dois
+  nós com a mesma cadeia não fiquem trocando de versão.
+- Etapa 8 (órfãs): as transações dos blocos descartados voltam à mempool
+  (`Mempool.AddRange`), **menos** as que a cadeia adotada já confirmou. Sem essa exclusão, a
+  mesma transação minerada nos dois lados do fork voltaria para a fila e seria minerada de novo.
+- Etapa 8 (sync manual): não há `BackgroundService` consultando os peers sozinho — o nó
+  sincroniza quando alguém pede. Mantém a demonstração e os testes determinísticos e deixa
+  explícito quem decide sincronizar.
+- Etapa 8 (o que a falha de um teste ensinou): com push (etapa 6) e gossip (etapa 7), um nó
+  "em dia" **não** diverge de ninguém — o bloco que ele minera chega aos peers na mesma
+  requisição. Fork só nasce quando um nó está **à frente** e outro mina depois (o bloco que
+  sobe é recusado com 409), que é o mesmo cenário de um nó isolado. Por isso o teste de fork
+  usa um nó **sem `PEERS`**, que avança sozinho antes de o outro minerar.
 
 ## Cenário de demonstração final (referência para as etapas)
 

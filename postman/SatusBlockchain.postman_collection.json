@@ -467,6 +467,44 @@
         },
         "description": "POST /transactions/receive — o endpoint que um PEER chama (nao o cliente): e aqui que o gossip da etapa 7 entrega a transacao. 200 = entrou na mempool local; 409 = ja estava pendente (dedup) ou ja esta confirmada em um bloco."
       }
+    },
+    {
+      "name": "13. Sincronizar chain",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK (peer fora do ar e situacao normal: quem informa e o relatorio)', () => pm.response.to.have.status(200));",
+              "",
+              "const relatorio = pm.response.json();",
+              "pm.test('relatorio traz o antes/depois e o desfecho por peer', () => {",
+              "    pm.expect(relatorio.previousLength).to.be.a('number');",
+              "    pm.expect(relatorio.length).to.be.a('number');",
+              "    pm.expect(relatorio.orphansBackToMempool).to.be.a('number');",
+              "    pm.expect(relatorio.peers).to.be.an('array');",
+              "});",
+              "pm.test('se adotou, veio de um peer e a cadeia nao encolheu', () => {",
+              "    if (relatorio.adopted !== null) {",
+              "        pm.expect(relatorio.adopted.from).to.be.a('string');",
+              "        pm.expect(relatorio.length).to.be.above(relatorio.previousLength);",
+              "    }",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{node1Url}}/sync",
+          "host": ["{{node1Url}}"],
+          "path": ["sync"]
+        },
+        "description": "POST /sync (etapa 8) — o no PUXA a cadeia de cada peer e adota a valida mais longa; as transacoes dos blocos orfaos voltam para a mempool. Troque a URL para node2Url/node3Url para recuperar um no que ficou atras. A resposta traz adopted, orphansBackToMempool e o desfecho por peer (Adopted/Kept/Invalid/Unreachable)."
+      }
     }
   ]
 }

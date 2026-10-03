@@ -38,6 +38,29 @@ public class Mempool
     }
 
     /// <summary>
+    /// Adiciona várias transações de uma vez, sem duplicar. Usado no <c>POST /sync</c> para
+    /// devolver à fila as transações dos blocos que perderam o reorg: elas não foram
+    /// invalidadas, apenas saíram da cadeia vencedora.
+    /// </summary>
+    /// <returns>Quantas transações entraram na fila (as repetidas são ignoradas).</returns>
+    public int AddRange(IEnumerable<Transaction> transactions)
+    {
+        lock (_lock)
+        {
+            var added = 0;
+
+            // Add trava o mesmo _lock de novo: Lock é reentrante, então aninhar é seguro.
+            foreach (var transaction in transactions)
+            {
+                if (Add(transaction))
+                    added++;
+            }
+
+            return added;
+        }
+    }
+
+    /// <summary>
     /// Remove exatamente as transações que entraram em um bloco.
     /// Usar "remover o que foi minerado" (em vez de "limpar tudo") mantém a
     /// fila correta mesmo que uma transação tenha sido criada durante a mineração.

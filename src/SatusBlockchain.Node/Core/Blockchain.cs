@@ -4,8 +4,9 @@ namespace SatusBlockchain.Node.Core;
 /// Uma cadeia de blocos em memória. Cada nó do SatusBlockchain possui a sua própria
 /// instância (estado replicado).
 ///
-/// Thread-safe por <c>lock</c>: no futuro, blocos podem chegar de duas fontes
-/// simultâneas (mineração local e blocos propagados por outros nós).
+/// Thread-safe por <c>lock</c>: blocos podem chegar de três fontes — mineração local,
+/// propagação de outro nó (etapa 6) e substituição pela cadeia mais longa que um peer
+/// manda no <c>POST /sync</c> (etapa 8).
 /// </summary>
 public class Blockchain
 {
@@ -124,28 +125,97 @@ public class Blockchain
     /// <summary>
     /// Valida a cadeia inteira: índices sequenciais, elos de PreviousHash
     /// consistentes e hash de cada bloco igual ao hash recalculado do seu conteúdo
-    /// (é isso que detecta adulteração).
+    /// (é isso que detecta adulteração). Delega para <see cref="IsValidChain"/>, a mesma
+    /// regra que julga a cadeia recebida de um peer.
     /// </summary>
     public bool IsValid()
     {
         lock (_lock)
+            return IsValidChain(_chain, Difficulty);
+    }
+
+    /// <summary>
+    /// Regra única de "cadeia válida": índices sequenciais a partir do 0, elos de
+    /// PreviousHash consistentes, hash recalculado igual ao armazenado e PoW válido na
+    /// dificuldade informada. Vale tanto para a cadeia local (<see cref="IsValid"/>) quanto
+    /// para a que um peer envia no <c>POST /sync</c> — um código só, para não haver duas
+    /// verdades sobre o que é uma cadeia legítima.
+    /// </summary>
+    private static bool IsValidChain(IReadOnlyList<Block> chain, byte difficulty)
+    {
+        if (chain.Count == 0)
+            return false;
+
+        for (var position = 0; position < chain.Count; position++)
         {
-            if (_chain.Count == 0)
+            var expectedPreviousHash = position == 0
+                ? GenesisPreviousHash
+                : chain[position - 1].Hash;
+
+            if (!IsValidBlock(chain[position], expectedIndex: position,
+                    expectedPreviousHash, difficulty))
                 return false;
-
-            for (var position = 0; position < _chain.Count; position++)
-            {
-                var expectedPreviousHash = position == 0
-                    ? GenesisPreviousHash
-                    : _chain[position - 1].Hash;
-
-                if (!IsValidBlock(_chain[position], expectedIndex: position,
-                        expectedPreviousHash, Difficulty))
-                    return false;
-            }
-
-            return true;
         }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Tenta adotar a cadeia que um peer mandou no <c>POST /sync</c> (etapa 8) —
+    /// o lado do **pull** do sistema. Consenso aqui é o mais simples possível: a
+    /// <b>cadeia válida mais longa vence</b>.
+    ///
+    /// Três regras, nesta ordem:
+    /// <list type="number">
+    ///   <item><b>Mesmo genesis</b>: dificuldade diferente gera genesis diferente, e aí
+    ///   são dois "universos" — o PoW de lá não valeria aqui.</item>
+    ///   <item><b>Cadeia válida</b>: a mesma regra de <see cref="IsValid"/>, aplicada
+    ///   localmente. Não confiamos no julgamento do peer: validamos nós mesmos.</item>
+    ///   <item><b>Estritamente mais longa</b>: empate mantém a local (regra "first seen").</item>
+    /// </list>
+    ///
+    /// Devolve as transações órfãs, mas NÃO as repõe na mempool: a Mempool é outra
+    /// camada (estado local), e quem coordena as duas é a API.
+    /// </summary>
+    public ChainUpdateResult TryReplaceChain(IReadOnlyList<Block> candidate)
+    {
+        lock (_lock)
+        {
+            if (candidate.Count == 0 || candidate[0].Hash != _chain[0].Hash)
+                return new ChainUpdateResult(ChainUpdate.Invalid, _chain.Count, []);
+
+            if (!IsValidChain(candidate, Difficulty))
+                return new ChainUpdateResult(ChainUpdate.Invalid, _chain.Count, []);
+
+            if (candidate.Count <= _chain.Count)
+                return new ChainUpdateResult(ChainUpdate.Kept, _chain.Count, []);
+
+            var orphans = GetOrphanTransactions(candidate);
+            _chain.Clear();
+            _chain.AddRange(candidate);
+
+            return new ChainUpdateResult(ChainUpdate.Adopted, _chain.Count, orphans);
+        }
+    }
+
+    /// <summary>
+    /// Transações que estavam nos blocos locais descartados e <b>não</b> estão na cadeia
+    /// adotada — é o que volta para a mempool, como no Bitcoin: o bloco órfão é
+    /// descartado, mas as transações dele continuam válidas e podem ser mineradas de novo.
+    ///
+    /// As transações que a cadeia vencedora reusou ficam de fora de propósito: elas já
+    /// estão confirmadas, e voltar à fila as mineraria duas vezes.
+    /// </summary>
+    private List<Transaction> GetOrphanTransactions(IReadOnlyList<Block> candidate)
+    {
+        // Transaction é record: o HashSet compara por valor (From/To/Amount).
+        var kept = candidate.SelectMany(block => block.Transactions).ToHashSet();
+
+        return _chain
+            .Where(local => candidate.All(block => block.Hash != local.Hash))
+            .SelectMany(local => local.Transactions)
+            .Where(transaction => !kept.Contains(transaction))
+            .ToList();
     }
 
     public static Block CreateGenesisBlock(byte difficulty = ProofOfWork.DefaultDifficulty)

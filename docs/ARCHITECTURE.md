@@ -85,7 +85,7 @@ SatusBlockchain/
 | `ProofOfWork` | Encontrar nonce que satisfaça a dificuldade; verificar nonce | decidir política de dificuldade |
 | `Blockchain` | Cadeia em memória: genesis, adição de bloco, validação, substituição (reorg) | falar HTTP |
 | `Mempool` | Fila FIFO de transações pendentes, com dedup por valor | priorização por taxa, evicção, expiração |
-| `PeerClient` | HTTP de saída tolerante a peer offline: push de bloco e gossip de transação | consultar a cadeia dos peers (pull, etapa 8); regras de consenso |
+| `PeerClient` | HTTP de saída tolerante a peer offline: push de bloco, gossip de transação e pull da cadeia (`/sync`) | regras de consenso (a validação é do domínio) |
 | Endpoints | Exposição REST do nó | lógica de domínio |
 
 ## 4. Modelo de dados
@@ -155,9 +155,20 @@ gerar hashes diferentes em nós diferentes.
 
 ### Pull (sincronização) — etapa 8
 
-- `POST /sync` consulta `GET /chain` de cada peer e aplica a **longest chain rule**. É o
-  mecanismo que recupera o nó que ficou offline: no push puro ele apenas recusa os blocos
-  com 409, porque não encaixam na cadeia dele.
+- `POST /sync` consulta `GET /chain` de cada peer (`PeerClient.GetChainsAsync`, em paralelo e
+  com o mesmo timeout de 2 s) e aplica a **longest chain rule**. É o mecanismo que recupera o
+  nó que ficou offline: no push puro ele apenas recusa os blocos com 409, porque não encaixam
+  na cadeia dele.
+- A cadeia recebida é **validada localmente** (`Blockchain.TryReplaceChain` → `IsValidChain`, o
+  mesmo código do `IsValid`): não confiamos no julgamento do peer. Dificuldade diferente gera
+  genesis diferente, e aí o nó rejeita a cadeia como "outro universo".
+- Só entra cadeia **estritamente mais longa**; empate mantém a local. O `POST /sync` responde
+  **200 sempre** — peer ausente é situação normal numa rede parcial — e devolve um relatório por
+  peer (`Adopted` / `Kept` / `Invalid` / `Unreachable`).
+- Transações dos blocos órfãos voltam à **mempool** (`Mempool.AddRange`), exceto as que a
+  cadeia adotada já confirmou.
+- O sync é **manual**: não há `BackgroundService` consultando os peers sozinho. Deixa explícito
+  quem decide sincronizar e mantém a demonstração e os testes determinísticos.
 
 ### Peers estáticos
 

@@ -277,4 +277,157 @@ public class BlockchainTests
     }
 
     #endregion
+
+    #region Sincronização e reorg (etapa 8)
+
+    // Os testes desta região usam dificuldade 2: o PoW é instantâneo, mas o genesis
+    // continua sendo o MESMO entre os nós (dificuldade igual => mesmo genesis).
+
+    [Fact]
+    public void TryReplaceChain_AdotaCadeiaValidaMaisLonga()
+    {
+        // O caso real da recuperação: o nó local ficou fora e o peer tem 3 blocos.
+        var local = new Blockchain(difficulty: 2);
+        var peer = new Blockchain(difficulty: 2);
+        peer.AddBlock(CreateMinedNextBlock(peer, new Transaction("alice", "bob", 10m)));
+        peer.AddBlock(CreateMinedNextBlock(peer, new Transaction("bob", "carol", 5m)));
+        var esperada = peer.GetChain();
+
+        var result = local.TryReplaceChain(esperada);
+
+        Assert.Equal(ChainUpdate.Adopted, result.Outcome);
+        Assert.Equal(3, result.Length);
+        Assert.True(local.IsValid());
+        Assert.Equal(esperada.Select(block => block.Hash), local.GetChain().Select(block => block.Hash));
+    }
+
+    [Fact]
+    public void TryReplaceChain_Empate_MantemACadeiaLocal()
+    {
+        // Regra "first seen": no empate ninguém troca, senão dois nós trocariam de
+        // versão indefinidamente sem nunca convergir.
+        var local = new Blockchain(difficulty: 2);
+        local.AddBlock(CreateMinedNextBlock(local, new Transaction("eu", "eu", 1m)));
+        var meuHash = local.GetChain()[1].Hash;
+
+        var peer = new Blockchain(difficulty: 2);
+        peer.AddBlock(CreateMinedNextBlock(peer, new Transaction("peer", "peer", 2m)));
+
+        var result = local.TryReplaceChain(peer.GetChain());
+
+        Assert.Equal(ChainUpdate.Kept, result.Outcome);
+        Assert.Equal(meuHash, local.GetChain()[1].Hash);
+    }
+
+    [Fact]
+    public void TryReplaceChain_CadeiaMenor_MantemACadeiaLocal()
+    {
+        // Um peer que está ATRÁS não pode fazer este nó voltar atrás.
+        var local = new Blockchain(difficulty: 2);
+        local.AddBlock(CreateMinedNextBlock(local, new Transaction("a", "b", 1m)));
+        local.AddBlock(CreateMinedNextBlock(local, new Transaction("c", "d", 2m)));
+        var meuHash = local.GetLatestBlock().Hash;
+
+        var atrasado = new Blockchain(difficulty: 2); // só o genesis
+
+        var result = local.TryReplaceChain(atrasado.GetChain());
+
+        Assert.Equal(ChainUpdate.Kept, result.Outcome);
+        Assert.Equal(3, local.Length);
+        Assert.Equal(meuHash, local.GetLatestBlock().Hash);
+    }
+
+    [Fact]
+    public void TryReplaceChain_CadeiaAdulterada_Rejeita()
+    {
+        var local = new Blockchain(difficulty: 2);
+        var peer = new Blockchain(difficulty: 2);
+        peer.AddBlock(CreateMinedNextBlock(peer, new Transaction("alice", "bob", 10m)));
+
+        // Adulteração pós-envio: o conteúdo muda, o Hash gravado continua o antigo.
+        var adulterada = peer.GetChain();
+        ((List<Transaction>)adulterada[1].Transactions).Add(new Transaction("eve", "eve", 999m));
+
+        var result = local.TryReplaceChain(adulterada);
+
+        Assert.Equal(ChainUpdate.Invalid, result.Outcome);
+        Assert.Equal(1, local.Length);
+        Assert.True(local.IsValid());
+    }
+
+    [Fact]
+    public void TryReplaceChain_GenesisDiferente_Rejeita()
+    {
+        // Dificuldade diferente gera genesis diferente: são dois "universos" e o PoW
+        // de lá não valeria aqui. Por isso a checagem de genesis vem ANTES do tamanho.
+        var local = new Blockchain(difficulty: 2);
+        var outro = new Blockchain(difficulty: 3);
+        outro.AddBlock(CreateMinedNextBlock(outro, new Transaction("alice", "bob", 10m)));
+        outro.AddBlock(CreateMinedNextBlock(outro, new Transaction("bob", "carol", 5m)));
+
+        var result = local.TryReplaceChain(outro.GetChain());
+
+        Assert.Equal(ChainUpdate.Invalid, result.Outcome);
+        Assert.Equal(1, local.Length);
+    }
+
+    [Fact]
+    public void TryReplaceChain_CadeiaVazia_Rejeita()
+    {
+        var local = new Blockchain(difficulty: 2);
+
+        var result = local.TryReplaceChain([]);
+
+        Assert.Equal(ChainUpdate.Invalid, result.Outcome);
+        Assert.Equal(1, local.Length);
+    }
+
+    [Fact]
+    public void TryReplaceChain_Orfas_DevolveSoAsTransacoesQuePerderam()
+    {
+        // Fork: as duas pontas compartilham o bloco 1. A local segue por txLocal; a
+        // candidata segue por txPeer (e é mais longa, então vence).
+        var local = new Blockchain(difficulty: 2);
+        var comum = CreateMinedNextBlock(local, new Transaction("alice", "bob", 10m));
+        local.AddBlock(comum);
+        var txPerdida = new Transaction("local", "local", 5m);
+        local.AddBlock(CreateMinedNextBlock(local, txPerdida));
+
+        var candidata = new List<Block> { local.GetChain()[0], comum };
+        var proximo = CreateNextBlock(comum, new Transaction("peer", "peer", 7m));
+        ProofOfWork.Mine(proximo, local.Difficulty);
+        var ultimo = CreateNextBlock(proximo, new Transaction("peer", "outro", 8m));
+        ProofOfWork.Mine(ultimo, local.Difficulty);
+        candidata.Add(proximo);
+        candidata.Add(ultimo);
+
+        var result = local.TryReplaceChain(candidata);
+
+        Assert.Equal(ChainUpdate.Adopted, result.Outcome);
+        // Só a transação do bloco órfão volta; a do bloco 1 está na cadeia adotada.
+        Assert.Equal([txPerdida], result.OrphanTransactions);
+        Assert.True(local.IsValid());
+    }
+
+    [Fact]
+    public async Task TryReplaceChain_ConcorrenteComMineBlock_NuncaCorrompeACadeia()
+    {
+        // Três fontes disputam a cadeia ao mesmo tempo (etapa 8): mineração local,
+        // push de outro nó e a substituição vinda do sync. Só a invariante importa.
+        var local = new Blockchain(difficulty: 2);
+        var peer = new Blockchain(difficulty: 2);
+        for (var i = 0; i < 3; i++)
+            peer.AddBlock(CreateMinedNextBlock(peer, new Transaction("peer", $"peer{i}", i + 1m)));
+
+        var mineracao = Task.Run(() => local.MineBlock([new Transaction("eu", "eu", 1m)]));
+        var sync = Task.Run(() => local.TryReplaceChain(peer.GetChain()));
+        var push = Task.Run(() => local.AddBlock(CreateMinedNextBlock(local, new Transaction("push", "push", 2m))));
+
+        await Task.WhenAll(mineracao, sync, push);
+
+        Assert.True(local.IsValid());
+        Assert.True(local.Length >= 4); // os 4 blocos do peer (genesis + 3) são o piso
+    }
+
+    #endregion
 }

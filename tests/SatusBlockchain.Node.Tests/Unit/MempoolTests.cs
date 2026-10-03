@@ -83,4 +83,20 @@ public class MempoolTests
         Assert.True(entrou);
         Assert.Equal(2, mempool.GetPending().Count);
     }
+
+    [Fact]
+    public void AddRange_AdicionaVarias_SemDuplicar_E_DevolveQuantasEntraram()
+    {
+        // Caminho do reorg (etapa 8): as transações órfãs voltam à fila de uma vez,
+        // e as repetidas não incham a fila de novo.
+        var mempool = new Mempool();
+        var alice = new Transaction("alice", "bob", 10m);
+        var carol = new Transaction("bob", "carol", 5m);
+        mempool.Add(carol); // já estava na fila
+
+        var adicionadas = mempool.AddRange([alice, carol]);
+
+        Assert.Equal(1, adicionadas);
+        Assert.Equal(2, mempool.GetPending().Count);
+    }
 }

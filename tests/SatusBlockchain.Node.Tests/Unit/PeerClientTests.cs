@@ -129,7 +129,87 @@ public class PeerClientTests
         Assert.Equal("inacessível", result.Detail);
     }
 
+    [Fact]
+    public async Task GetChains_LêACadeiaDeCadaPeer()
+    {
+        // O pull (etapa 8) lê GET /chain — em camelCase, o mesmo formato que a API
+        // serializa e que o Hasher usa no cálculo do hash.
+        var handler = new StubHandler(_ => Json(JsonSerializer.Serialize(new[] { Block(), Block() }, WebJson)));
+        using var http = new HttpClient(handler);
+        var client = new PeerClient(http, Options("http://node2:8080", "http://node3:8080"),
+            NullLogger<PeerClient>.Instance);
+
+        var chains = await client.GetChainsAsync();
+
+        Assert.Equal(2, chains.Count);
+        Assert.All(handler.Requests, request => Assert.EndsWith("/chain", request.Url));
+        Assert.All(chains, result =>
+        {
+            Assert.NotNull(result.Chain);
+            Assert.Equal(2, result.Chain!.Count);
+            Assert.Equal("hash-do-bloco", result.Chain[0].Hash);
+        });
+    }
+
+    [Fact]
+    public async Task GetChains_PeerInacessivel_ReportaNull_SemImpedirOsDemais()
+    {
+        var handler = new StubHandler(request =>
+            request.RequestUri!.Host == "node2"
+                ? throw new HttpRequestException("conexão recusada")
+                : Json("[]"));
+
+        using var http = new HttpClient(handler);
+        var client = new PeerClient(http, Options("http://node2:8080", "http://node3:8080"),
+            NullLogger<PeerClient>.Instance);
+
+        var chains = await client.GetChainsAsync();
+
+        var inacessivel = Assert.Single(chains, chain => chain.Peer.Contains("node2"));
+        Assert.Null(inacessivel.Chain);
+        Assert.Equal("inacessível", inacessivel.Detail);
+
+        // O peer seguinte foi lido normalmente: a falha de um não cancela o pull.
+        var lido = Assert.Single(chains, chain => chain.Peer.Contains("node3"));
+        Assert.NotNull(lido.Chain);
+    }
+
+    [Fact]
+    public async Task GetChains_RespostaQueNaoECadeia_ViraResultado_E_NaoEstouraExcecao()
+    {
+        // Respondeu 200 com um JSON que não é uma lista de blocos. Vira resultado, para o
+        // POST /sync ignorar este peer em vez de responder 500.
+        var handler = new StubHandler(_ => Json("{\"nao\":\"e uma cadeia\"}"));
+        using var http = new HttpClient(handler);
+        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance);
+
+        var result = Assert.Single(await client.GetChainsAsync());
+
+        Assert.Null(result.Chain);
+        Assert.Equal("JSON inválido", result.Detail);
+    }
+
+    [Fact]
+    public async Task GetChains_SemPeers_NaoChamaNenhum()
+    {
+        var handler = new StubHandler(_ => throw new InvalidOperationException("não deveria chamar"));
+        using var http = new HttpClient(handler);
+        var client = new PeerClient(http, Options(), NullLogger<PeerClient>.Instance);
+
+        var chains = await client.GetChainsAsync();
+
+        Assert.Empty(chains);
+        Assert.Empty(handler.Requests);
+    }
+
     private static NodeOptions Options(params string[] peers) => new("node-test", 2, peers);
+
+    /// <summary>Resposta 200 com corpo JSON (o media type não importa: o PeerClient
+    /// desserializa o corpo, não negocia content-type).</summary>
+    private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(body)
+    };
 
     private static Block Block() => new()
     {

@@ -55,6 +55,7 @@ O collection já tem as variáveis:
 | 10 | `GET /chain` | cadeia com 2 blocos: cada `previousHash` igual ao `hash` do anterior |
 | 11 | `GET /peers` | peers configurados (`PEERS`) — vazio no `dotnet run` sem `PEERS`; com Docker, `http://node2:8080` e `http://node3:8080` |
 | 12 | `POST /transactions/receive` | entrega a transação como um **peer** faria (gossip): **200** entra na mempool; rodando de novo, **409** (dedup) |
+| 13 | `POST /sync` | **pull**: o nó pergunta a cadeia dos peers e adota a válida mais longa (request 4.1) |
 
 ## 4. Propagação entre os nós (etapa 6)
 
@@ -90,6 +91,24 @@ alimentada pelo repasse. E o bloco pode ser minerado em **outro** nó: troque `b
 `http://localhost:8082` antes do request 7 e a transação que nasceu no node1 entra no bloco
 minerado pelo node3. A request 12 entrega uma transação direto no endpoint de gossip, como um
 peer faria (rodando duas vezes, a segunda responde 409 por dedup).
+
+### 4.1 Sincronização de um nó atrasado (etapa 8)
+
+O push (request 7) resolve o nó em dia; o **pull** resolve o nó que ficou para trás. Com os
+containers no ar, o roteiro é:
+
+```powershell
+docker compose stop node3                    # o nó cai e perde a memória
+curl -X POST http://localhost:8080/blocks/mine    # node1 mineia; o node2 recebe por push
+curl -X POST http://localhost:8080/blocks/mine
+docker compose start node3                   # volta só com o genesis
+```
+
+Depois, troque a URL da request 13 para `{{node3Url}}` e envie: o node3 puxa a cadeia dos
+peers, adota a mais longa e passa a mostrar os mesmos blocos (`GET /chain` com a mesma
+impressão digital do node1). A resposta traz `adopted` e `orphansBackToMempool` — este último
+aparece quando o nó tinha um bloco próprio que perdeu: as transações órfãs voltam para
+`GET /transactions/pending` (request 6).
 
 ## 5. Rodar tudo de uma vez (Collection Runner)
 
