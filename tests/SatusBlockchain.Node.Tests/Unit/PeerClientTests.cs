@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SatusBlockchain.Node;
 using SatusBlockchain.Node.Core;
 using SatusBlockchain.Node.Networking;
+using SatusBlockchain.Node.Observability;
 
 namespace SatusBlockchain.Node.Tests.Unit;
 
@@ -22,7 +23,7 @@ public class PeerClientTests
     {
         var handler = new StubHandler(_ => throw new InvalidOperationException("não deveria enviar"));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options(), NullLogger<PeerClient>.Instance);
+        var client = new PeerClient(http, Options(), NullLogger<PeerClient>.Instance, Telemetry());
 
         var results = await client.BroadcastBlockAsync(Block());
 
@@ -36,7 +37,7 @@ public class PeerClientTests
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
         using var http = new HttpClient(handler);
         var client = new PeerClient(http,
-            Options("http://node2:8080", "http://node3:8080"), NullLogger<PeerClient>.Instance);
+            Options("http://node2:8080", "http://node3:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var results = await client.BroadcastBlockAsync(Block());
 
@@ -61,7 +62,7 @@ public class PeerClientTests
         // e não pode virar exceção na mineração local.
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Conflict));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance);
+        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var result = Assert.Single(await client.BroadcastBlockAsync(Block()));
 
@@ -79,7 +80,7 @@ public class PeerClientTests
 
         using var http = new HttpClient(handler);
         var client = new PeerClient(http,
-            Options("http://node2:8080", "http://node3:8080"), NullLogger<PeerClient>.Instance);
+            Options("http://node2:8080", "http://node3:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var results = await client.BroadcastBlockAsync(Block());
 
@@ -98,7 +99,7 @@ public class PeerClientTests
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
         using var http = new HttpClient(handler);
         var client = new PeerClient(http, Options("http://node2:8080", "http://node3:8080"),
-            NullLogger<PeerClient>.Instance);
+            NullLogger<PeerClient>.Instance, Telemetry());
 
         var results = await client.BroadcastTransactionAsync(new Transaction("alice", "bob", 10m));
 
@@ -121,7 +122,7 @@ public class PeerClientTests
         // mempool local e o peer pode recebê-la depois (via bloco ou nova tentativa).
         var handler = new StubHandler(_ => throw new HttpRequestException("conexão recusada"));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance);
+        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var result = Assert.Single(await client.BroadcastTransactionAsync(new Transaction("alice", "bob", 10m)));
 
@@ -137,7 +138,7 @@ public class PeerClientTests
         var handler = new StubHandler(_ => Json(JsonSerializer.Serialize(new[] { Block(), Block() }, WebJson)));
         using var http = new HttpClient(handler);
         var client = new PeerClient(http, Options("http://node2:8080", "http://node3:8080"),
-            NullLogger<PeerClient>.Instance);
+            NullLogger<PeerClient>.Instance, Telemetry());
 
         var chains = await client.GetChainsAsync();
 
@@ -161,7 +162,7 @@ public class PeerClientTests
 
         using var http = new HttpClient(handler);
         var client = new PeerClient(http, Options("http://node2:8080", "http://node3:8080"),
-            NullLogger<PeerClient>.Instance);
+            NullLogger<PeerClient>.Instance, Telemetry());
 
         var chains = await client.GetChainsAsync();
 
@@ -181,7 +182,7 @@ public class PeerClientTests
         // POST /sync ignorar este peer em vez de responder 500.
         var handler = new StubHandler(_ => Json("{\"nao\":\"e uma cadeia\"}"));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance);
+        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var result = Assert.Single(await client.GetChainsAsync());
 
@@ -194,13 +195,39 @@ public class PeerClientTests
     {
         var handler = new StubHandler(_ => throw new InvalidOperationException("não deveria chamar"));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options(), NullLogger<PeerClient>.Instance);
+        var client = new PeerClient(http, Options(), NullLogger<PeerClient>.Instance, Telemetry());
 
         var chains = await client.GetChainsAsync();
 
         Assert.Empty(chains);
         Assert.Empty(handler.Requests);
     }
+
+    [Fact]
+    public async Task Broadcast_PeerRecusa_IncrementaContadorDePush()
+    {
+        // O desfecho por peer (aceito/recusado/inacessível) só existe dentro do
+        // PeerClient — é lá que o contador satus.peer.push é registrado (etapa 9).
+        // 409 é recusa do peer; "inacessível" é falha de rede: tags diferentes.
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Conflict));
+        using var http = new HttpClient(handler);
+        var telemetry = Telemetry();
+        using var spy = new MetricSpy(telemetry);
+        var client = new PeerClient(http, Options("http://node2:8080"),
+            NullLogger<PeerClient>.Instance, telemetry);
+
+        await client.BroadcastBlockAsync(Block());
+
+        Assert.Equal(1, spy.TotalWithTags("satus.peer.push",
+            ("kind", "block"), ("outcome", "refused")));
+    }
+
+    /// <summary>
+    /// Telemetria real para o construtor do <see cref="PeerClient"/> (etapa 9): instância
+    /// barata (genesis na dificuldade 2), sem exportador — os testes leem os contadores
+    /// com um <c>MeterListener</c> quando o desfecho é o que está sob teste.
+    /// </summary>
+    private static NodeTelemetry Telemetry() => new(new Blockchain(2), new Mempool());
 
     private static NodeOptions Options(params string[] peers) => new("node-test", 2, peers);
 

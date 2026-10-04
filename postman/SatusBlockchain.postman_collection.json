@@ -505,6 +505,43 @@
         },
         "description": "POST /sync (etapa 8) — o no PUXA a cadeia de cada peer e adota a valida mais longa; as transacoes dos blocos orfaos voltam para a mempool. Troque a URL para node2Url/node3Url para recuperar um no que ficou atras. A resposta traz adopted, orphansBackToMempool e o desfecho por peer (Adopted/Kept/Invalid/Unreachable)."
       }
+    },
+    {
+      "name": "14. Metricas (GET /metrics)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK (pull: e o mesmo caminho que o Prometheus raspa)', () => pm.response.to.have.status(200));",
+              "",
+              "const corpo = pm.response.text();",
+              "pm.test('gauge da cadeia presente com valor numerico', () => {",
+              "    pm.expect(corpo).to.match(/satus_chain_length\\{[^}]*\\} \\d+/);",
+              "});",
+              "pm.test('metadados TYPE do Prometheus presentes', () => {",
+              "    pm.expect(corpo).to.include('# TYPE satus_chain_length gauge');",
+              "});",
+              "pm.test('counter de mineracao (apos o request 7) usa o sufixo _total', () => {",
+              "    if (corpo.includes('satus_blocks_mined')) {",
+              "        pm.expect(corpo).to.include('satus_blocks_mined_total');",
+              "    }",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{node1Url}}/metrics",
+          "host": ["{{node1Url}}"],
+          "path": ["metrics"]
+        },
+        "description": "GET /metrics (etapa 9) — metricas do no no formato Prometheus, o mesmo endpoint que o Prometheus raspa. Gauges (satus_chain_length, satus_mempool_size) existem desde a subida e mostram o estado atual; counters (satus_blocks_mined_total etc.) nascem na primeira medicao. Os valores vem com labels otel_scope_name/otel_scope_version no meio (convencao do formato). Apos minerar (request 7), o valor pode levar ~2s para aparecer."
+      }
     }
   ]
 }

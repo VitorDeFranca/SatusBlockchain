@@ -1,0 +1,79 @@
+# Etapa 9: stack de observabilidade — OVERLAY do docker-compose.yml base.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+#
+# O compose base NÃO muda: sem este arquivo, `docker compose up` continua sendo os
+# 3 nós exatamente como nas etapas 5–8. Aqui só se ACRESCENTA:
+#   - OTEL_EXPORTER_OTLP_ENDPOINT nos 3 nós → habilita o export de TRACES (push OTLP);
+#   - Jaeger    → traces, UI em http://localhost:16686;
+#   - Prometheus → raspa GET /metrics dos 3 nós, UI em http://localhost:9090;
+#   - Grafana   → dashboard, http://localhost:3000 (anônimo, só leitura).
+#
+# Métricas NÃO vão para o Jaeger: topologia clássica — Jaeger guarda traces,
+# Prometheus guarda métricas, o console (docker compose logs) guarda os logs.
+
+name: satusblockchain
+
+services:
+  # ---- os 3 nós ganham só a env var de OTLP (o resto é merge do compose base) ----
+  node1:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      - jaeger
+  node2:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      - jaeger
+  node3:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      - jaeger
+
+  # ---- infraestrutura de observabilidade ----
+  jaeger:
+    # all-in-one (collector + UI + storage em memória) — imagem oficial atual (v2).
+    # O OTLP já vem habilitado por padrão no v2 (4317 gRPC / 4318 HTTP internos);
+    # ao host é publicada só a UI. Os traces morrem no `docker compose down` —
+    # para uma demonstração isso é intencional (nada de estado a limpar).
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.21.0
+    container_name: jaeger
+    ports:
+      - "16686:16686"
+    networks:
+      - satus-net
+    restart: unless-stopped
+
+  prometheus:
+    # Raspa os 3 nós a cada 5s (config em observability/prometheus.yml).
+    # É o lado PULL da observabilidade: os nós não sabem que o Prometheus existe.
+    image: prom/prometheus:v3.15.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - satus-net
+    restart: unless-stopped
+
+  grafana:
+    # Dashboard provisionado (datasource + painéis entram prontos, sem clique manual).
+    # Acesso anônimo em modo leitura — na apresentação, é só abrir http://localhost:3000.
+    image: grafana/grafana:13.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - satus-net
+    restart: unless-stopped

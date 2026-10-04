@@ -33,6 +33,7 @@ O projeto deve permitir demonstrar:
 - Docker e Docker Compose
 - xUnit (testes unitários)
 - System.Net.Http / System.Text.Json (BCL) — sem bibliotecas externas de blockchain
+- OpenTelemetry (.NET), Prometheus, Grafana e Jaeger (etapa 9 — observabilidade)
 
 ## 4. Requisitos funcionais
 
@@ -53,6 +54,7 @@ O projeto deve permitir demonstrar:
 | RF-13 | Peers são configurados estaticamente por variável de ambiente (`PEERS=http://node2:8080,...`). |
 | RF-14 | Ao aceitar uma transação, o nó deve propagá-la aos peers (gossip: `POST /transactions/receive`), para que **qualquer** nó possa incluí-la em um bloco. |
 | RF-15 | Um nó deve aceitar uma transação recebida somente se for válida, não estiver já pendente na mempool local e não estiver já confirmada na cadeia local. |
+| RF-16 | O nó deve expor suas métricas no formato Prometheus (`GET /metrics`) e, quando `OTEL_EXPORTER_OTLP_ENDPOINT` estiver definido, exportar traces via OTLP. |
 
 ### Endpoints previstos
 
@@ -66,6 +68,7 @@ POST /blocks/receive         → recebe bloco propagado por outro nó
 POST /transactions/receive   → recebe transação propagada por outro nó (gossip)
 POST /sync                   → sincroniza com peers (longest chain rule)
 GET  /peers                  → lista peers configurados
+GET  /metrics                → métricas do nó no formato Prometheus (etapa 9)
 ```
 
 ## 5. Requisitos não funcionais
@@ -75,7 +78,8 @@ GET  /peers                  → lista peers configurados
 - **Estado em memória**: sem banco de dados. Reiniciar um nó implica perder a cadeia local
   e ressincronizar com os peers (comportamento desejado para a demonstração de recuperação).
 - **Concorrência**: thread-safety via `lock` simples nas estruturas mutáveis (cadeia e mempool).
-- **Configuração por ambiente**: `NODE_ID`, `PEERS`, `DIFFICULTY`, porta HTTP.
+- **Configuração por ambiente**: `NODE_ID`, `PEERS`, `DIFFICULTY`, porta HTTP e
+  `OTEL_EXPORTER_OTLP_ENDPOINT` (opcional — habilita o export de traces, etapa 9).
 
 ## 6. Fora de escopo (deliberadamente)
 
@@ -86,7 +90,8 @@ GET  /peers                  → lista peers configurados
 - validação de timestamps;
 - mineração automática em background;
 - TLS, autenticação ou autorização entre nós;
-- métricas, observabilidade, rate limiting.
+- rate limiting, alertas ou APM (a etapa 9 **observa** o sistema — logs, métricas e traces —;
+  ela não vigia, não bloqueia e não decide nada).
 
 ## 7. Decisões registradas
 

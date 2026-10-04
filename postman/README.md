@@ -39,7 +39,7 @@ O collection já tem as variáveis:
 | `baseUrl` | `http://localhost:5165` | endereço do nó |
 | `difficulty` | `2` | testar o Proof of Work (`hash` começa com N zeros) |
 
-## 3. Execute na ordem 1 → 12
+## 3. Execute na ordem 1 → 14
 
 | # | Request | O que observar |
 |---|---------|----------------|
@@ -56,6 +56,7 @@ O collection já tem as variáveis:
 | 11 | `GET /peers` | peers configurados (`PEERS`) — vazio no `dotnet run` sem `PEERS`; com Docker, `http://node2:8080` e `http://node3:8080` |
 | 12 | `POST /transactions/receive` | entrega a transação como um **peer** faria (gossip): **200** entra na mempool; rodando de novo, **409** (dedup) |
 | 13 | `POST /sync` | **pull**: o nó pergunta a cadeia dos peers e adota a válida mais longa (request 4.1) |
+| 14 | `GET /metrics` | métricas do nó em formato **Prometheus**: gauge `satus_chain_length` com o tamanho atual; após o request 7, o counter `satus_blocks_mined_total` |
 
 ## 4. Propagação entre os nós (etapa 6)
 
@@ -109,6 +110,23 @@ peers, adota a mais longa e passa a mostrar os mesmos blocos (`GET /chain` com a
 impressão digital do node1). A resposta traz `adopted` e `orphansBackToMempool` — este último
 aparece quando o nó tinha um bloco próprio que perdeu: as transações órfãs voltam para
 `GET /transactions/pending` (request 6).
+
+### 4.2 Métricas do nó
+
+O request 14 lê `GET /metrics` — o mesmo endpoint que o Prometheus raspa. No texto de saída:
+
+- `satus_chain_length{otel_scope_name="..."} 1` — gauge com o tamanho **atual** da cadeia;
+- `satus_blocks_mined_total{...} 1` — counter que **nasce** na primeira mineração;
+- `# TYPE ... gauge` / `# TYPE ... counter` — metadados que o Prometheus usa ao importar.
+
+Os valores vêm com labels no meio (`{otel_scope_name=...}`): é a convenção do formato
+Prometheus, não um erro na URL. Depois de minerar, o valor pode levar ~2s para refletir — a
+leitura tem um pequeno atraso assíncrono que o Prometheus (raspagem de 5s) nem percebe.
+
+Com a stack de observabilidade no ar
+(`docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d`), as
+mesmas séries alimentam o dashboard do Grafana (`localhost:3000`) e a mineração gera trace no
+Jaeger (`localhost:16686`) — roteiro completo na seção "Observabilidade" do README.
 
 ## 5. Rodar tudo de uma vez (Collection Runner)
 

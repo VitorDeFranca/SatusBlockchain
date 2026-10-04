@@ -1,0 +1,12 @@
+# Datasource provisionado — o Grafana nasce apontando para o Prometheus,
+# sem clique manual de configuração (o uid "prometheus" é o que o dashboard referencia).
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

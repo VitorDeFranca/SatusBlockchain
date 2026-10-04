@@ -16,14 +16,15 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 | 6 | Propagação (push) | `PeerClient`, broadcast no mine, `/blocks/receive` | Comunicação nó-a-nó, replicação de estado, tolerância a peer offline | ✅ |
 | 7 | Gossip de transações | `PeerClient.BroadcastTransactionAsync`, `/transactions/receive`, dedup na mempool | Replicação em duas camadas: mempool (estado local, sem consenso) x cadeia | ✅ |
 | 8 | Consenso e sync (pull) | `POST /sync`, longest chain rule, substituição de cadeia (reorg) | Consenso, consistência eventual, recuperação após falha | ✅ |
-| 9 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
-| 10 | Fechamento | README final, docs atualizados, roteiro de apresentação | — | ⬜ |
+| 9 | Observabilidade | OpenTelemetry: `GET /metrics` (Prometheus + Grafana) e traces (Jaeger) — logs já existiam | Os três pilares de observabilidade; telemetria como janela para o sistema distribuído | ✅ |
+| 10 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
+| 11 | Fechamento | README final, docs atualizados, roteiro de apresentação | — | ⬜ |
 
 ## Notas de ordenação
 
-- Testes acompanham as etapas 1–7 (não são etapa separada): **unidade** para o domínio e para
-  o `PeerClient` (etapas 1–3, 6 e 7) e **integração HTTP** para a API (etapas 4, 6 e 7),
-  subindo o nó real em um processo isolado, em porta livre.
+- Testes acompanham as etapas 1–9 (não são etapa separada): **unidade** para o domínio, para
+  o `PeerClient` e para a telemetria (etapas 1–3, 6, 7 e 9) e **integração HTTP** para a API
+  (etapas 4, 6–9), subindo o nó real em um processo isolado, em porta livre.
 - Os testes ficam em **um projeto só** (`tests/SatusBlockchain.Node.Tests`), com uma pasta
   por tipo: `Unit/` (domínio isolado, sem rede) e `Integration/` (sobe o nó e conversa por
   HTTP). Os namespaces `…Tests.Unit` / `…Tests.Integration` permitem rodar só um conjunto:
@@ -137,6 +138,36 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   sobe é recusado com 409), que é o mesmo cenário de um nó isolado. Por isso o teste de fork
   usa um nó **sem `PEERS`**, que avança sozinho antes de o outro minerar.
 
+- Etapa 9 (três pilares, um código): **logs** já existiam (`ILogger` das etapas 6–8, no
+  console), e a etapa acrescentou os outros dois com a mesma filosofia — **métricas** via
+  `NodeTelemetry` (`Meter` da BCL) → `GET /metrics` (pull, formato Prometheus) → Prometheus →
+  Grafana; **traces** via `ActivitySource` + spans automáticos (servidor e `HttpClient`) →
+  OTLP (push) → Jaeger. O OpenTelemetry é só a camada de instrumentação/exportação: Jaeger e
+  Prometheus são destinos trocáveis sem mexer no código do nó.
+- Etapa 9 (OTLP condicional): o exportador de traces só é registrado se
+  `OTEL_EXPORTER_OTLP_ENDPOINT` existir (e o `NodeServer` dos testes REMOVE a variável do
+  ambiente herdado). Sem Jaeger, nada tenta falar com `:4317` — testes e `dotnet run` ficam
+  limpos; o `/metrics`, por ser pull, sempre está no ar. O batch de export com flush de 1s
+  (padrão 5s) existe para a demonstração em sala ver o trace quase junto com o curl.
+- Etapa 9 (cardinalidade): tags só de domínio fechado (`outcome`, `kind`, `source`, `peer`).
+  Hash, índice ou timestamp como tag viraria uma série permanente nova a cada bloco e
+  explodiria a base do Prometheus. No scrape, o instrumento `satus.blocks.mined` aparece como
+  `satus_blocks_mined_total{otel_scope_name=...} 1` — mesmo instrumento na convenção do
+  formato Prometheus — e counter sem nenhuma medição ainda não nasce: a série nasce no
+  primeiro fato.
+- Etapa 9 (overlay do compose): `docker-compose.observability.yml` só ACRESCENTA serviços e a
+  env de OTLP, acionado com `-f` duplo — o `docker-compose.yml` da etapa 5 continua byte a
+  byte igual e `docker compose up` (sem overlay) segue sendo os 3 nós de sempre.
+- Etapa 9 (o que os testes ensinaram): (1) o singleton da telemetria era preguiçoso —
+  construído só no primeiro endpoint que o injetasse, o primeiro scrape do `/metrics` saía
+  sem nenhuma série `satus_*`; resolveu-se materializando-o já na subida. (2) A leitura do
+  `/metrics` tem uma janela de atraso assíncrona: raspagem imediata pode ver o snapshot
+  anterior — o teste espera a série aparecer (polling), exatamente o papel do Prometheus ao
+  raspar a cada 5s. (3) Gauge criado com `() => Length` infere `T=int` no `MeterListener`, e
+  só registrar callback `long` faria os gauges sumirem do teste. Validação ao vivo: um único
+  trace do `POST /blocks/mine` encadeou node1 → node2 e node1 → node3 pelo `traceparent`,
+  e o Jaeger listou os três serviços.
+
 ## Cenário de demonstração final (referência para as etapas)
 
 1. `docker compose up` com 3 nós;
@@ -146,4 +177,6 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 4. derrubar o node3, minerar mais blocos nos demais;
 5. religar o node3 e sincronizá-lo (`POST /sync`, etapa 8);
 6. provocar um fork (isolar node3, minerar em ambos os lados);
-7. religar e observar a convergência pela longest chain rule.
+7. religar e observar a convergência pela longest chain rule;
+8. (opcional, etapa 9) subir a stack de observabilidade e repetir 2–7 vendo as métricas
+   mudarem no Grafana e o trace de cada mineração atravessando os três nós no Jaeger.

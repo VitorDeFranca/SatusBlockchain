@@ -94,6 +94,7 @@ curl http://localhost:5165/chain/validate
 | `POST /blocks/receive` | Recebe um bloco propagado (**200** aceito · **409** se não estende a cadeia) |
 | `GET /peers` | Peers configurados (`PEERS`) — o destino do push |
 | `POST /sync` | Puxa a cadeia dos peers e adota a **válida mais longa** (órfãs voltam à mempool) |
+| `GET /metrics` | Métricas do nó no formato **Prometheus** (etapa 9): `satus_chain_length`, contadores `satus_*_total`, duração HTTP |
 
 ## Como executar (3 nós com Docker)
 
@@ -139,3 +140,36 @@ docker compose up -d --force-recreate      # mineração instantânea
 > nó, então genesis(dif 2) ≠ genesis(dif 4) e um bloco minerado com 2 zeros não satisfaz o
 > PoW de quem exige 4 — o peer recusaria tudo (409). Por isso os serviços compartilham a
 > mesma `${NODE_DIFFICULTY:-4}`; confira em `GET /` (`difficulty`).
+
+## Observabilidade
+
+O nó instrumenta os três pilares com **OpenTelemetry**: logs (o `ILogger`),
+métricas (`GET /metrics`, raspadas pelo **Prometheus** e exibidas no **Grafana**) e traces
+(enviados por OTLP ao **Jaeger** quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido).
+
+```powershell
+# stack completa: os 3 nós + Jaeger + Prometheus + Grafana (overlay; o compose base não muda)
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
+
+curl http://localhost:8080/metrics            # métricas do node1 (sempre disponível)
+curl -X POST http://localhost:8080/blocks/mine
+Start-Sleep -Seconds 3                        # a leitura tem ~2s de atraso assíncrono
+curl http://localhost:8080/metrics            # satus_blocks_mined_total{...} 1
+```
+
+| Serviço | URL | O que mostrar |
+|---------|-----|---------------|
+| Jaeger | http://localhost:16686 | trace do `POST /blocks/mine` atravessando os 3 nós (serviços `node1/node2/node3`) |
+| Prometheus | http://localhost:9090 | targets `up`; query `satus_chain_length` por nó |
+| Grafana | http://localhost:3000 | dashboard **SatusBlockchain — Visão dos nós** (provisionado, acesso anônimo) |
+
+**Demo de trace:** mine no node1 → no Jaeger, `Service: node1` → operação
+`POST /blocks/mine` → um trace com o span `mine` (o PoW) e os spans `POST /blocks/receive`
+do **node2** e do **node3** — o `traceparent` atravessa a rede: é a prova visual de sistemas
+distribuídos, com um trace só para toda a propagação.
+
+Sem o overlay, `docker compose up` continua sendo apenas os 3 nós: o `/metrics` segue
+disponível (é pull), mas nada é exportado — sem Jaeger, sem Prometheus.
+
+> Detalhes, catálogo de métricas e decisões em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+> (seção 10) e [docs/ROADMAP.md](docs/ROADMAP.md) (notas da etapa 9).

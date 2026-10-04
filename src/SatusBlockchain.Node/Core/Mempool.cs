@@ -38,6 +38,19 @@ public class Mempool
     }
 
     /// <summary>
+    /// Quantidade de transações pendentes — leitura rápida usada pelo gauge
+    /// <c>satus.mempool.size</c> (etapa 9), sem copiar a fila inteira.
+    /// </summary>
+    public int Count
+    {
+        get
+        {
+            lock (_lock)
+                return _pending.Count;
+        }
+    }
+
+    /// <summary>
     /// Adiciona várias transações de uma vez, sem duplicar. Usado no <c>POST /sync</c> para
     /// devolver à fila as transações dos blocos que perderam o reorg: elas não foram
     /// invalidadas, apenas saíram da cadeia vencedora.

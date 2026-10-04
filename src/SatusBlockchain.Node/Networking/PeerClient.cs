@@ -1,24 +1,18 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using SatusBlockchain.Node.Core;
+using SatusBlockchain.Node.Observability;
 
 namespace SatusBlockchain.Node.Networking;
 
 /// <summary>
-/// Comunicação de SAÍDA do nó (etapas 6 e 7): o **push** do bloco minerado e o **gossip**
-/// das transações, para os peers configurados em PEERS.
-///
-/// Tolerância a falhas: um peer offline, mudo ou que recuse o payload NÃO pode derrubar a
-/// operação local (minerar ou aceitar uma transação). Cada envio é isolado — uma falha vira
-/// log + resultado "inacessível" — e os envios acontecem em PARALELO, para que um peer
-/// lento não atrase os demais. Quem decide aceitar é o peer receptor: bloco via
-/// `Blockchain.AddBlock`, transação via validação + dedup da mempool.
-///
-/// O **pull** (ler a cadeia dos peers, etapa 8) também mora aqui, em
-/// <see cref="GetChainsAsync"/>, e é acionado pelo POST /sync: o push leva o bloco novo,
-/// mas nunca a HISTÓRIA que um nó perdeu enquanto estava fora do ar.
+/// Comunicação de SAÍDA do nó: o **push** do bloco minerado e o **gossip**
+/// das transações, para os peers configurados em PEERS. Tolerância a falhas:
+/// um peer offline, mudo ou que recuse o payload NÃO pode derrubar a operação
+/// local (minerar ou aceitar uma transação).
 /// </summary>
-public class PeerClient(HttpClient httpClient, NodeOptions options, ILogger<PeerClient> logger)
+public class PeerClient(HttpClient httpClient, NodeOptions options, ILogger<PeerClient> logger,
+    NodeTelemetry telemetry)
 {
     private const string Unreachable = "inacessível";
 
@@ -29,7 +23,7 @@ public class PeerClient(HttpClient httpClient, NodeOptions options, ILogger<Peer
     public async Task<IReadOnlyList<PeerResult>> BroadcastBlockAsync(
         Block block, CancellationToken cancellationToken = default)
     {
-        var results = await BroadcastAsync("/blocks/receive", block, cancellationToken);
+        var results = await BroadcastAsync("/blocks/receive", block, kind: "block", cancellationToken);
         LogResults(results, $"Bloco {block.Index}");
         return results;
     }
@@ -41,7 +35,7 @@ public class PeerClient(HttpClient httpClient, NodeOptions options, ILogger<Peer
     public async Task<IReadOnlyList<PeerResult>> BroadcastTransactionAsync(
         Transaction transaction, CancellationToken cancellationToken = default)
     {
-        var results = await BroadcastAsync("/transactions/receive", transaction, cancellationToken);
+        var results = await BroadcastAsync("/transactions/receive", transaction, kind: "transaction", cancellationToken);
         LogResults(results, $"a transação {transaction.From}->{transaction.To}");
         return results;
     }
@@ -59,9 +53,15 @@ public class PeerClient(HttpClient httpClient, NodeOptions options, ILogger<Peer
         foreach (var chain in chains)
         {
             if (chain.Chain is not null)
+            {
+                telemetry.PeerPull("read");
                 logger.LogInformation("Peer {Peer} respondeu com {Length} blocos.", chain.Peer, chain.Chain.Count);
+            }
             else
+            {
+                telemetry.PeerPull(chain.Detail == Unreachable ? "unreachable" : "invalid");
                 logger.LogWarning("Não foi possível ler a cadeia do peer {Peer}: {Motivo}.", chain.Peer, chain.Detail);
+            }
         }
 
         return chains;
@@ -75,9 +75,6 @@ public class PeerClient(HttpClient httpClient, NodeOptions options, ILogger<Peer
             if (!response.IsSuccessStatusCode)
                 return new PeerChain(peer, null, $"{(int)response.StatusCode}");
 
-            // JsonSerializerOptions.Web = camelCase: é o mesmo formato que GET /chain
-            // serializa E que o Hasher usa no cálculo do hash. Desserializar em outra
-            // convenção faria a recontagem do hash não bater, e a cadeia pareceria inválida.
             var chain = await response.Content.ReadFromJsonAsync<List<Block>>(
                 JsonSerializerOptions.Web, cancellationToken);
 
@@ -103,15 +100,16 @@ public class PeerClient(HttpClient httpClient, NodeOptions options, ILogger<Peer
     /// Envia o mesmo payload a todos os peers, em paralelo: um peer lento (ou fora do ar)
     /// não atrasa nem cancela o envio aos demais.
     /// </summary>
+    /// <param name="kind">Rótulo de domínio fechado da métrica: <c>block</c> ou <c>transaction</c>.</param>
     private async Task<IReadOnlyList<PeerResult>> BroadcastAsync(
-        string path, object payload, CancellationToken cancellationToken)
+        string path, object payload, string kind, CancellationToken cancellationToken)
     {
-        var sends = options.Peers.Select(peer => SendAsync(peer, path, payload, cancellationToken));
+        var sends = options.Peers.Select(peer => SendAsync(peer, path, payload, kind, cancellationToken));
 
         return await Task.WhenAll(sends);
     }
 
-    private async Task<PeerResult> SendAsync(string peer, string path, object payload,
+    private async Task<PeerResult> SendAsync(string peer, string path, object payload, string kind,
         CancellationToken cancellationToken)
     {
         try
@@ -122,12 +120,15 @@ public class PeerClient(HttpClient httpClient, NodeOptions options, ILogger<Peer
             using var response = await httpClient.PostAsJsonAsync(
                 $"{peer}{path}", payload, JsonSerializerOptions.Web, cancellationToken);
 
-            return new PeerResult(peer, response.IsSuccessStatusCode, $"{(int)response.StatusCode}");
+            var accepted = response.IsSuccessStatusCode;
+            telemetry.PeerPush(kind, accepted, unreachable: false);
+            return new PeerResult(peer, accepted, $"{(int)response.StatusCode}");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             // HttpRequestException: conexão recusada/DNS. TaskCanceledException: o
             // timeout do HttpClient estourou (peer no ar, mas travado).
+            telemetry.PeerPush(kind, accepted: false, unreachable: true);
             logger.LogWarning("Peer {Peer} inacessível: {Motivo}", peer, ex.Message);
             return new PeerResult(peer, Accepted: false, Unreachable);
         }

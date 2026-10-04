@@ -1,5 +1,6 @@
 using SatusBlockchain.Node.Core;
 using SatusBlockchain.Node.Networking;
+using SatusBlockchain.Node.Observability;
 
 namespace SatusBlockchain.Node.Api;
 
@@ -17,17 +18,25 @@ public static class TransactionEndpoints
         // Validação mínima didática (sem assinatura, sem saldos).
         // Entra na mempool local E é propagada: daí em diante qualquer nó que a tenha
         // recebido pode incluí-la em um bloco (basta minerar nele).
-        group.MapPost("/", async (Transaction transaction, Mempool mempool, PeerClient peerClient) =>
+        group.MapPost("/", async (Transaction transaction, Mempool mempool, PeerClient peerClient,
+            NodeTelemetry telemetry) =>
         {
             if (!IsValid(transaction))
+            {
+                telemetry.TransactionReceived(fromPeer: false, accepted: false);
                 return InvalidTransaction();
+            }
 
             // Dedup: postar a mesma transação duas vezes não enche a fila duas vezes.
-            // A resposta continua 201 Created para o cliente — reenviar não é erro dele;
-            // quem recebe 409 é o peer que reenvia (ver /transactions/receive). E se já
-            // estava na fila, também não reanuncia: os peers já foram avisados antes.
             if (mempool.Add(transaction))
+            {
+                telemetry.TransactionReceived(fromPeer: false, accepted: true);
                 await peerClient.BroadcastTransactionAsync(transaction);
+            }
+            else
+            {
+                telemetry.TransactionReceived(fromPeer: false, accepted: false);
+            }
 
             return Results.Created("/transactions/pending", transaction);
         });
@@ -35,18 +44,22 @@ public static class TransactionEndpoints
         // Recebe uma transação propagada por outro nó (gossip de 1 hop: o receptor NÃO
         // re-propaga — com as listas de PEERS completas, um hop alcança todos os nós).
         group.MapPost("/receive", (Transaction transaction, Mempool mempool, Blockchain blockchain,
-            ILoggerFactory loggerFactory) =>
+            NodeTelemetry telemetry, ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("Transactions");
 
             if (!IsValid(transaction))
+            {
+                telemetry.TransactionReceived(fromPeer: true, accepted: false);
                 return InvalidTransaction();
+            }
 
             // O bloco pode chegar ANTES da transação (depende de qual peer responde
             // primeiro). Sem esta checagem, uma transação já confirmada ficaria pendente
             // para sempre na mempool local — e poderia entrar em um segundo bloco.
             if (blockchain.ContainsTransaction(transaction))
             {
+                telemetry.TransactionReceived(fromPeer: true, accepted: false);
                 logger.LogWarning("Transação {From}->{To} recusada: já está confirmada em um bloco.",
                     transaction.From, transaction.To);
                 return Results.Conflict(new
@@ -58,6 +71,7 @@ public static class TransactionEndpoints
 
             if (!mempool.Add(transaction))
             {
+                telemetry.TransactionReceived(fromPeer: true, accepted: false);
                 logger.LogWarning("Transação {From}->{To} recusada: já está pendente na mempool.",
                     transaction.From, transaction.To);
                 return Results.Conflict(new
@@ -67,6 +81,7 @@ public static class TransactionEndpoints
                 });
             }
 
+            telemetry.TransactionReceived(fromPeer: true, accepted: true);
             var pending = mempool.GetPending().Count;
             logger.LogInformation("Transação {From}->{To} recebida de um peer. Mempool com {Count} pendentes.",
                 transaction.From, transaction.To, pending);

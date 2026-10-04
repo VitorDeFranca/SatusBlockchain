@@ -1,0 +1,14 @@
+# Etapa 9: provider de dashboards por arquivo — qualquer JSON em
+# /var/lib/grafana/dashboards (montado de observability/grafana/dashboards)
+# é carregado automaticamente na subida do Grafana.
+apiVersion: 1
+
+providers:
+  - name: SatusBlockchain
+    folder: ""
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

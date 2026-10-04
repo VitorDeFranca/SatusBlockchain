@@ -112,6 +112,10 @@ public sealed class NodeServer : IDisposable
         // Definido SEMPRE (mesmo vazio): um PEERS deixado no ambiente de quem executa
         // os testes faria o nó tentar propagar para peers que não existem.
         startInfo.Environment["PEERS"] = peers is null ? string.Empty : string.Join(",", peers);
+        // Sem Jaeger nos testes: REMOVE o endpoint OTLP herdado do ambiente de quem
+        // executa (mesma razão do PEERS) — nenhum teste pode tentar exportar trace
+        // para fora. Cobre a decisão "OTLP condicional" da etapa 9.
+        startInfo.Environment.Remove("OTEL_EXPORTER_OTLP_ENDPOINT");
 
         return startInfo;
     }

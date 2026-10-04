@@ -63,7 +63,8 @@ SatusBlockchain/
 │       ├── Core/              # domínio: Block, Transaction, Blockchain, Mempool, Hasher, ProofOfWork
 │       ├── Networking/        # PeerClient (comunicação de saída com outros nós)
 │       ├── Api/               # endpoints Minimal API agrupados por recurso
-│       ├── Program.cs         # composição da aplicação (DI, mapeamento de endpoints)
+│       ├── Observability/     # NodeTelemetry: contadores/gauges satus.* e spans próprios
+│       ├── Program.cs         # composição da aplicação (DI, endpoints, pipeline OpenTelemetry)
 │       └── Dockerfile         # imagem do nó (build multi-stage)
 ├── tests/
 │   └── SatusBlockchain.Node.Tests/
@@ -71,6 +72,8 @@ SatusBlockchain/
 │       └── Integration/        # sobe o nó e conversa por HTTP
 ├── .dockerignore              # contexto de build enxuto (sem bin/obj/docs/tests)
 ├── docker-compose.yml         # os 3 nós (node1, node2, node3)
+├── docker-compose.observability.yml  # overlay : Jaeger, Prometheus, Grafana + OTLP
+├── observability/             # config da stack: scrape do Prometheus e provisioning do Grafana
 ├── SatusBlockchain.sln
 └── README.md
 ```
@@ -86,6 +89,7 @@ SatusBlockchain/
 | `Blockchain` | Cadeia em memória: genesis, adição de bloco, validação, substituição (reorg) | falar HTTP |
 | `Mempool` | Fila FIFO de transações pendentes, com dedup por valor | priorização por taxa, evicção, expiração |
 | `PeerClient` | HTTP de saída tolerante a peer offline: push de bloco, gossip de transação e pull da cadeia (`/sync`) | regras de consenso (a validação é do domínio) |
+| `NodeTelemetry` | Instrumentação: contadores/gauges `satus.*` e spans próprios `mine`/`sync` | exportar (papel do pipeline OpenTelemetry do `Program.cs`) ou gravar logs |
 | Endpoints | Exposição REST do nó | lógica de domínio |
 
 ## 4. Modelo de dados
@@ -213,13 +217,57 @@ recebimento via push). Locks simples são suficientes no volume didático do pro
 | `PEERS` | `http://node2:8080,http://node3:8080` | Lista estática de peers (destino do push), validada na subida |
 | `DIFFICULTY` | `4` | Zeros hexadecimais exigidos no PoW |
 | `ASPNETCORE_HTTP_PORTS` | `8080` | Porta HTTP do nó (definida no `Dockerfile`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://jaeger:4317` | **Opcional:** habilita o export de traces via OTLP. Se ausente, nenhum exportador de trace é registrado |
 
 No `docker-compose.yml`, a dificuldade dos três containers vem de `NODE_DIFFICULTY`
-(padrão 2 = mineração em milissegundos; use 4 para mostrar o custo do PoW). O nome é
+(padrão 4 = ~1s por bloco; use 2 para mineração instantânea). O nome é
 exclusivo do compose de propósito: um `DIFFICULTY` deixado no shell (usado pelo
 `dotnet run`) não pode mais alterar os containers sem querer.
 
-## 10. Alternativas consideradas e descartadas
+## 10. Observabilidade
+
+Os três pilares, cada um com o seu caminho:
+
+| Pilar | Instrumentação | Caminho | Destino |
+|-------|----------------|---------|---------|
+| **Logs** | `ILogger` | console do container | `docker compose logs` |
+| **Métricas** | `NodeTelemetry` (`Meter`) + instrumentação ASP.NET/HttpClient | `GET /metrics` (pull, formato Prometheus) | Prometheus → Grafana |
+| **Traces** | `ActivitySource` + spans automáticos (servidor e `HttpClient`) | OTLP (push), **só** se `OTEL_EXPORTER_OTLP_ENDPOINT` existir | Jaeger |
+
+- **OpenTelemetry instrumenta, destinos trocam**: nomes de séries e spans moram no código do
+  nó (fontes `SatusBlockchain.Node`); trocar Jaeger/Prometheus por outro backend muda apenas
+  o compose, não o código do nó.
+- **Catálogo de métricas** (tags sempre de domínio fechado):
+
+  | Métrica (nome OTel) | Tipo | Tags |
+  |---------------------|------|------|
+  | `satus.blocks.mined` | counter | — |
+  | `satus.blocks.received` | counter | `outcome=accepted\|rejected` |
+  | `satus.peer.push` | counter | `kind=block\|transaction`, `outcome=accepted\|refused\|unreachable` |
+  | `satus.peer.pull` | counter | `outcome=read\|unreachable\|invalid` |
+  | `satus.sync` | counter | `outcome=adopted\|kept` |
+  | `satus.txs.received` | counter | `source=client\|peer`, `outcome=accepted\|rejected` |
+  | `satus.chain.length` | gauge | — |
+  | `satus.mempool.size` | gauge | — |
+
+- **Trace que atravessa nós**: o `HttpClient` injeta o `traceparent` no push/gossip/pull e o
+  ASP.NET o relê na entrada — o `POST /blocks/mine` do node1 vira a RAIZ de um trace cujos
+  filhos são os `POST /blocks/receive` do node2 e do node3 (verificado ao vivo: um trace,
+  três serviços, com o span `mine` — o PoW — no meio).
+- **Cardinalidade**: nunca hash, índice ou timestamp como tag — cada valor distinto é uma
+  série permanente no Prometheus. Na saída, o nome aparece na convenção do formato
+  (`satus_blocks_mined_total{otel_scope_name=...} 1`) e counter sem nenhuma medição ainda
+  não nasce: a série nasce no primeiro fato.
+- **Comportamentos aprendidos**: o singleton da telemetria é materializado na subida (sem
+  isso, o primeiro `/metrics` sairia sem séries `satus_*`); a leitura tem uma janela de
+  atraso assíncrona de segundos — irrelevante para o Prometheus, que raspa a cada 5s, mas os
+  testes esperam a série aparecer antes de asserir.
+- **Stack** (overlay `docker-compose.observability.yml`, acionado com `-f` duplo): Jaeger
+  (`cr.jaegertracing.io/jaegertracing/jaeger:2.21.0`, UI em `:16686`, API em `/api/v3/...`),
+  Prometheus (`:9090`, scrape de 5s dos três `:8080/metrics`) e Grafana (`:3000`, datasource
+  e dashboard provisionados). O `docker-compose.yml` base não é alterado.
+
+## 11. Alternativas consideradas e descartadas
 
 | Alternativa | Motivo do descarte |
 |-------------|--------------------|

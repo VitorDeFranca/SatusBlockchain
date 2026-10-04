@@ -1,5 +1,6 @@
 using SatusBlockchain.Node.Core;
 using SatusBlockchain.Node.Networking;
+using SatusBlockchain.Node.Observability;
 
 namespace SatusBlockchain.Node.Api;
 
@@ -17,10 +18,13 @@ public static class SyncEndpoints
     {
         // Rota na RAIZ (/sync), não sob /chain: é uma AÇÃO do nó, não uma leitura de cadeia.
         routes.MapPost("/sync", async (Blockchain blockchain, Mempool mempool, PeerClient peerClient,
-            NodeOptions node, ILoggerFactory loggerFactory) =>
+            NodeOptions node, NodeTelemetry telemetry, ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("Sync");
             var previousLength = blockchain.Length;
+
+            using var activity = telemetry.StartActivity("sync");
+            activity?.SetTag("satus.sync.length_before", previousLength);
 
             // 1. Puxa a cadeia de cada peer em paralelo (quem não responde vira resultado).
             var chains = await peerClient.GetChainsAsync();
@@ -68,6 +72,15 @@ public static class SyncEndpoints
                 .Where(transaction => !blockchain.ContainsTransaction(transaction))
                 .ToList();
             var requeued = mempool.AddRange(backToMempool);
+
+            // Métrica + tags do span com o RESULTADO do sync — domínio fechado:
+            // outcome é adopted|kept, nunca a URL do peer como valor livre.
+            telemetry.Sync(adoptedFrom is not null ? "adopted" : "kept");
+            activity?.SetTag("satus.sync.outcome", adoptedFrom is not null ? "adopted" : "kept");
+            activity?.SetTag("satus.sync.length_after", blockchain.Length);
+            activity?.SetTag("satus.sync.orphans", requeued);
+            if (adoptedFrom is not null)
+                activity?.SetTag("satus.sync.adopted_from", adoptedFrom);
 
             if (adoptedFrom is not null)
             {

@@ -1,0 +1,20 @@
+# Os 3 nós publicam GET /metrics na porta 8080 — a INTERNA do container (do host elas
+# aparecem como 8080/8081/8082, mas o Prometheus roda na mesma rede e resolve os nós
+# pelo nome do serviço, todos escutando em 8080 lá dentro).
+#
+# 5s de intervalo: fino o bastante para acompanhar a demonstração de propagação
+# (um bloco por segundo na dificuldade 4) sem sufocar o nó raspado.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: satus-nodes
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["node1:8080", "node2:8080", "node3:8080"]
+
+  # O próprio Prometheus também se raspá (métrica de auto-saúde: targets UP).
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
