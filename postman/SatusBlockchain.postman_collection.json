@@ -21,6 +21,22 @@
     {
       "key": "difficulty",
       "value": "4"
+    },
+    {
+      "key": "prometheusUrl",
+      "value": "http://localhost:9090"
+    },
+    {
+      "key": "jaegerUrl",
+      "value": "http://localhost:16686"
+    },
+    {
+      "key": "lokiUrl",
+      "value": "http://localhost:3100"
+    },
+    {
+      "key": "grafanaUrl",
+      "value": "http://localhost:3000"
     }
   ],
   "item": [
@@ -541,6 +557,321 @@
           "path": ["metrics"]
         },
         "description": "GET /metrics (etapa 9) — metricas do no no formato Prometheus, o mesmo endpoint que o Prometheus raspa. Gauges (satus_chain_length, satus_mempool_size) existem desde a subida e mostram o estado atual; counters (satus_blocks_mined_total etc.) nascem na primeira medicao. Os valores vem com labels otel_scope_name/otel_scope_version no meio (convencao do formato). Apos minerar (request 7), o valor pode levar ~2s para aparecer."
+      }
+    },
+    {
+      "name": "15. Prometheus consulta metricas",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK (API HTTP do Prometheus)', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('resultado e uma serie de instantaneo', () => {",
+              "    pm.expect(r.status).to.eql('success');",
+              "    pm.expect(r.data.resultType).to.eql('vector');",
+              "});",
+              "pm.test('satus_chain_length tem valor >= 1', () => {",
+              "    const v = parseFloat(r.data.result[0].value[1]);",
+              "    pm.expect(v).to.be.at.least(1);",
+              "});",
+              "pm.test('a serie identifica o no (instance)', () => {",
+              "    pm.expect(r.data.result[0].metric.instance).to.be.a('string');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{prometheusUrl}}/api/v1/query?query=satus_chain_length",
+          "host": ["{{prometheusUrl}}"],
+          "path": ["api", "v1", "query"],
+          "query": [
+            {
+              "key": "query",
+              "value": "satus_chain_length"
+            }
+          ]
+        },
+        "description": "GET /api/v1/query (Prometheus) — consulta instantanea da mesma metrica do request 14, mas pelo lado do Prometheus: prova que o PULL funcionou (ele raspa os 3 nos a cada 5s). Rode o request 7 (mine) antes e veja o valor subir em ~5s. Sem filtro, a query devolve as 3 series (um valor por no)."
+      }
+    },
+    {
+      "name": "16. Prometheus targets saudaveis",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "const alvos = r.data.activeTargets;",
+              "pm.test('ao menos 4 alvos ativos: 3 nos + autoscraping do Prometheus', () => {",
+              "    pm.expect(alvos.length).to.be.at.least(4);",
+              "});",
+              "pm.test('todos com health=up (scrape sem falha)', () => {",
+              "    const caidos = alvos.filter(t => t.health !== 'up').map(t => t.scrapeUrl);",
+              "    pm.expect(caidos).to.eql([]);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{prometheusUrl}}/api/v1/targets?state=active",
+          "host": ["{{prometheusUrl}}"],
+          "path": ["api", "v1", "targets"],
+          "query": [
+            {
+              "key": "state",
+              "value": "active"
+            }
+          ]
+        },
+        "description": "GET /api/v1/targets (Prometheus) — saude de todos os alvos de scrape: 3 nos + o proprio Prometheus. health=up = raspagem do /metrics funcionando; se um no cair, aparece health=down aqui (e na UI http://localhost:9090/targets)."
+      }
+    },
+    {
+      "name": "17. Jaeger lista traces",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK (API do Jaeger)', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('os 3 nos aparecem como servicos distintos', () => {",
+              "    const servicos = (r.services || []).map(s => s.name || s);",
+              "    ['node1', 'node2', 'node3'].forEach(n => {",
+              "        pm.expect(servicos, `${n} ausente — mine (request 7) e aguarde ~3s`).to.include(n);",
+              "    });",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{jaegerUrl}}/api/v3/services",
+          "host": ["{{jaegerUrl}}"],
+          "path": ["api", "v3", "services"]
+        },
+        "description": "GET /api/v3/services (Jaeger v2) — servicos que exportaram traces. service.name = NODE_ID, entao node1/node2/node3 aparecem separados (e o UI desenha o mapa de dependencias entre eles). Lista vazia = a stack nao subiu com o overlay (OTEL_EXPORTER_OTLP_ENDPOINT), que e de proposito: sem Jaeger, o export fica desligado."
+      }
+    },
+    {
+      "name": "18. Jaeger busca trace de mineracao",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A API v3 do Jaeger exige a janela de busca em RFC3339 (UTC).",
+              "const fmt = d => d.toISOString().replace(/\\.\\d{3}Z$/, 'Z');",
+              "pm.variables.set('startTimeMin', fmt(new Date(Date.now() - 60 * 60 * 1000)));",
+              "pm.variables.set('startTimeMax', fmt(new Date()));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('sem erro da API', () => pm.expect(r.error).to.be.undefined);",
+              "",
+              "// Formato OTLP: result.resourceSpans[].scopeSpans[].spans[]",
+              "const spans = [];",
+              "((r.result || {}).resourceSpans || []).forEach(rs => {",
+              "    const svc = (rs.resource.attributes || []).find(a => a.key === 'service.name');",
+              "    const nome = svc ? svc.value.stringValue : 'desconhecido';",
+              "    (rs.scopeSpans || []).forEach(ss => (ss.spans || []).forEach(sp => spans.push({ nome: sp.name, service: nome })));",
+              "});",
+              "",
+              "pm.test('ha spans (mine antes e aguarde ~3s se vazio)', () => {",
+              "    pm.expect(spans.length, 'sem spans: rode o request 7 e rode de novo').to.be.at.least(1);",
+              "});",
+              "",
+              "if (spans.length > 0) {",
+              "    pm.test('inclui span de HTTP de entrada (POST)', () => {",
+              "        pm.expect(spans.some(s => (s.nome || '').includes('POST'))).to.be.true;",
+              "    });",
+              "    const servicos = [...new Set(spans.map(s => s.service))];",
+              "    if (servicos.length > 1) {",
+              "        pm.test('trace cruzou mais de um no (propagacao do traceparent)', () => {",
+              "            pm.expect(servicos.length).to.be.at.least(2);",
+              "        });",
+              "    }",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{jaegerUrl}}/api/v3/traces?query.service=node1&query.operation_name=POST%20/blocks/mine&query.startTimeMin={{startTimeMin}}&query.startTimeMax={{startTimeMax}}&query.limit=5",
+          "host": ["{{jaegerUrl}}"],
+          "path": ["api", "v3", "traces"],
+          "query": [
+            {
+              "key": "query.service",
+              "value": "node1"
+            },
+            {
+              "key": "query.operation_name",
+              "value": "POST /blocks/mine"
+            },
+            {
+              "key": "query.startTimeMin",
+              "value": "{{startTimeMin}}"
+            },
+            {
+              "key": "query.startTimeMax",
+              "value": "{{startTimeMax}}"
+            },
+            {
+              "key": "query.limit",
+              "value": "5"
+            }
+          ]
+        },
+        "description": "GET /api/v3/traces (Jaeger v2) — traces do POST /blocks/mine do node1 na ultima hora (a janela de tempo e calculada no pre-request script, pois a API v3 exige startTimeMin/Max em RFC3339; o filtro operation_name evita os traces de scrape do Prometheus afogarem o resultado). Depois de minerar (request 7) o trace contem: o span de entrada POST /blocks/mine, o span proprio 'mine' e — pela propagacao do traceparent — os POST /blocks/receive nos nodes 2 e 3 na MESMA arvore. Abra no UI: http://localhost:16686/trace/<traceId>. Batch OTLP com delay de 1s; se vier vazio, aguarde e rode de novo."
+      }
+    },
+    {
+      "name": "19. Loki labels do projeto",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK (API do Loki)', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('label compose_project so tem o projeto da aula', () => {",
+              "    pm.expect(r.data).to.include('satusblockchain');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{lokiUrl}}/loki/api/v1/label/compose_project/values",
+          "host": ["{{lokiUrl}}"],
+          "path": ["loki", "api", "v1", "label", "compose_project", "values"]
+        },
+        "description": "GET /loki/api/v1/label/... (Loki) — valores do label de projeto. O Alloy so coleta containers deste compose (filtro por label do Docker), entao 'satusblockchain' e o unico valor. Caminho dos logs: ILogger -> console do container -> Docker -> Alloy -> Loki -> Grafana."
+      }
+    },
+    {
+      "name": "20. Loki busca logs de mineracao",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('encontrou streams (mine e espere ~5s se vazio)', () => {",
+              "    pm.expect(r.data.result.length, 'sem logs: rode o request 7 e rode de novo').to.be.at.least(1);",
+              "});",
+              "",
+              "if (r.data.result.length > 0) {",
+              "    const stream = r.data.result[0];",
+              "    pm.test('stream identifica o container', () => {",
+              "        pm.expect(stream.stream.container).to.match(/^node[123]$/);",
+              "    });",
+              "    const temMineracao = r.data.result.some(s => s.values.some(v => v[1].includes('minerado')));",
+              "    if (temMineracao) {",
+              "        pm.test('log de bloco minerado presente', () => pm.expect(temMineracao).to.be.true);",
+              "    }",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{lokiUrl}}/loki/api/v1/query_range?query=%7Bcompose_project%3D%22satusblockchain%22%7D&limit=10",
+          "host": ["{{lokiUrl}}"],
+          "path": ["loki", "api", "v1", "query_range"],
+          "query": [
+            {
+              "key": "query",
+              "value": "{compose_project=\"satusblockchain\"}"
+            },
+            {
+              "key": "limit",
+              "value": "10"
+            }
+          ]
+        },
+        "description": "GET /loki/api/v1/query_range (Loki) — consulta LogQL dos logs mais recentes da stack inteira. Para filtrar: query={compose_project=\"satusblockchain\", container=\"node1\"} ou acrescente |= \"minerado\". O mesmo LogQL roda no Grafana Explore (datasource Loki) e no dashboard."
+      }
+    },
+    {
+      "name": "21. Grafana saude e datasources",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK (Grafana no ar)', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('banco de dados do Grafana ok', () => pm.expect(r.database).to.eql('ok'));",
+              "",
+              "pm.sendRequest('{{grafanaUrl}}/api/datasources', (err, resp) => {",
+              "    if (err) { throw new Error(err); }",
+              "    const nomes = resp.json().map(d => d.name);",
+              "    pm.test('datasources provisionadas: Prometheus + Loki', () => {",
+              "        pm.expect(nomes).to.include.members(['Prometheus', 'Loki']);",
+              "    });",
+              "    pm.done();",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{grafanaUrl}}/api/health",
+          "host": ["{{grafanaUrl}}"],
+          "path": ["api", "health"]
+        },
+        "description": "GET /api/health (Grafana) — Grafana no ar e, via chamada aninhada, as 2 datasources provisionadas (Prometheus + Loki) sem clique manual. Dashboards: http://localhost:3000/d/satus-nos (painel dos 3 nos) e Explore para logs. Acesso anonimo em modo leitura; admin/admin para editar."
       }
     }
   ]

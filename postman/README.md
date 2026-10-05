@@ -128,6 +128,34 @@ Com a stack de observabilidade no ar
 mesmas séries alimentam o dashboard do Grafana (`localhost:3000`) e a mineração gera trace no
 Jaeger (`localhost:16686`) — roteiro completo na seção "Observabilidade" do README.
 
+### 4.3 Observabilidade via API (requests 15–21)
+
+Os sete requests a seguir cobrem os **três pilares** de ponta a ponta. Rode o request 7
+(minerar) antes deles — cada teste avisa o que falta se algo vier vazio.
+
+| # | O que prova | Backend |
+|---|---|---|
+| 15 | O Prometheus **consultou** `satus_chain_length` (funcionou o pull) | Prometheus `:9090` |
+| 16 | Os 4 alvos de scrape estão `health=up` (3 nós + ele mesmo) | Prometheus `:9090` |
+| 17 | `node1/2/3` exportaram traces como serviços distintos | Jaeger `:16686` |
+| 18 | O trace do `POST /blocks/mine` cruza os 3 nós (traceparent) | Jaeger `:16686` |
+| 19 | O Loki só coleta os containers deste compose | Loki `:3100` |
+| 20 | Os logs chegam com `container=node1` e incluem "minerado" | Loki `:3100` |
+| 21 | Grafana no ar com as 2 datasources provisionadas | Grafana `:3000` |
+
+Detalhes que valem a pena saber antes de rodar:
+
+- **Request 18 tem pre-request script**: a API v3 do Jaeger exige `query.startTimeMin/Max`
+  em RFC3339 — a janela da última hora é calculada ali, não fixada na URL. Ele também filtra
+  `operation_name=POST /blocks/mine` porque o Prometheus raspa o `/metrics` a cada 5s e esses
+  traces de scrape afogariam o resultado (o limit voltaria sempre scrape).
+- **Formato da resposta v3**: diferente do v2 antigo, os spans vêm no formato OTLP
+  (`result.resourceSpans[].scopeSpans[].spans[]`) — é o que o teste do request 18 desmonta,
+  lendo o `service.name` de cada resource para detectar o cruzamento entre nós.
+- **LogQL do request 20**: `{compose_project="satusblockchain"} | = ...` — o mesmo filtro
+  funciona colado no **Explore** do Grafana (datasource Loki), que é a forma visual de
+  investigar.
+
 ## 5. Rodar tudo de uma vez (Collection Runner)
 
 No collection, clique em **Run** → **Run SatusBlockchain**. O Postman executa

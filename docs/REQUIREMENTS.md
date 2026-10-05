@@ -33,7 +33,7 @@ O projeto deve permitir demonstrar:
 - Docker e Docker Compose
 - xUnit (testes unitários)
 - System.Net.Http / System.Text.Json (BCL) — sem bibliotecas externas de blockchain
-- OpenTelemetry (.NET), Prometheus, Grafana e Jaeger (etapa 9 — observabilidade)
+- OpenTelemetry (.NET), Prometheus, Grafana, Jaeger, Loki e Alloy (etapa 9 — observabilidade dos três pilares)
 
 ## 4. Requisitos funcionais
 

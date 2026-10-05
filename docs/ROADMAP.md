@@ -139,11 +139,15 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   usa um nó **sem `PEERS`**, que avança sozinho antes de o outro minerar.
 
 - Etapa 9 (três pilares, um código): **logs** já existiam (`ILogger` das etapas 6–8, no
-  console), e a etapa acrescentou os outros dois com a mesma filosofia — **métricas** via
-  `NodeTelemetry` (`Meter` da BCL) → `GET /metrics` (pull, formato Prometheus) → Prometheus →
-  Grafana; **traces** via `ActivitySource` + spans automáticos (servidor e `HttpClient`) →
-  OTLP (push) → Jaeger. O OpenTelemetry é só a camada de instrumentação/exportação: Jaeger e
-  Prometheus são destinos trocáveis sem mexer no código do nó.
+  console) e ganharam destino (Alloy → Loki → Grafana); **métricas** via `NodeTelemetry`
+  (`Meter` da BCL) → `GET /metrics` (pull, formato Prometheus) → Prometheus → Grafana;
+  **traces** via `ActivitySource` + spans automáticos (servidor e `HttpClient`) → OTLP (push)
+  → Jaeger. O OpenTelemetry é só a camada de instrumentação/exportação: Jaeger, Prometheus,
+  Loki e Grafana são destinos trocáveis sem mexer no código do nó.
+- Etapa 9 (logs sem código novo): completar o pilar de logs não exigiu uma linha de C# — o
+  `ILogger` já escrevia no console do container, e bastou montar o caminho de coleta
+  (Docker API → Alloy → Loki → Grafana). É a divisão clássica de responsabilidade em
+  observabilidade: **o código da aplicação instrumenta, a plataforma transporta**.
 - Etapa 9 (OTLP condicional): o exportador de traces só é registrado se
   `OTEL_EXPORTER_OTLP_ENDPOINT` existir (e o `NodeServer` dos testes REMOVE a variável do
   ambiente herdado). Sem Jaeger, nada tenta falar com `:4317` — testes e `dotnet run` ficam
@@ -164,9 +168,22 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   `/metrics` tem uma janela de atraso assíncrona: raspagem imediata pode ver o snapshot
   anterior — o teste espera a série aparecer (polling), exatamente o papel do Prometheus ao
   raspar a cada 5s. (3) Gauge criado com `() => Length` infere `T=int` no `MeterListener`, e
-  só registrar callback `long` faria os gauges sumirem do teste. Validação ao vivo: um único
-  trace do `POST /blocks/mine` encadeou node1 → node2 e node1 → node3 pelo `traceparent`,
-  e o Jaeger listou os três serviços.
+  só registrar callback `long` faria os gauges sumirem do teste.
+- Etapa 9 (o que subir a stack ensinou — alinhar a versão da API com a da ferramenta): o
+  **Jaeger v2 removeu as APIs v1/v2** (`/api/services`, `/api/traces` devolvem 404): são
+  `/api/v3/services` e `/api/v3/traces`, que exigem `query.startTimeMin/Max` em RFC3339 e
+  respondem no **formato OTLP** (`result.resourceSpans[].scopeSpans[].spans[]`), não mais
+  `data[].spans[]`. E o scrape de 5s do Prometheus gera traces próprios (`GET /metrics`) que
+  afogam o `limit` da busca — daí o filtro `operation_name=POST /blocks/mine` nos requests.
+- Etapa 9 (o que subir a stack ensinou — o coletor também é software): o `filter` do
+  `discovery.docker` do Alloy é **bloco** (`name = "label"` + `values`), não atributo; e,
+  mais importante, o `loki.source.docker` **descarta os labels `__meta_*`** — sem um
+  `discovery.relabel` no meio, o Loki recebe os logs sem label de container (consultável por
+  `service_name=unknown_service`) e não dá para filtrar por nó no LogQL.
+- Etapa 9 (validação ao vivo): um único trace do `POST /blocks/mine` encadeou node1 → node2 e
+  node1 → node3 pelo `traceparent` (18 spans nos três serviços), o Jaeger listou os três
+  serviços, o Prometheus reportou os 4 alvos `up` e o Loki entregou o log `Bloco N minerado…`
+  com `container=node1`.
 
 ## Cenário de demonstração final (referência para as etapas)
 

@@ -72,8 +72,8 @@ SatusBlockchain/
 │       └── Integration/        # sobe o nó e conversa por HTTP
 ├── .dockerignore              # contexto de build enxuto (sem bin/obj/docs/tests)
 ├── docker-compose.yml         # os 3 nós (node1, node2, node3)
-├── docker-compose.observability.yml  # overlay : Jaeger, Prometheus, Grafana + OTLP
-├── observability/             # config da stack: scrape do Prometheus e provisioning do Grafana
+├── docker-compose.observability.yml  # overlay: Jaeger, Prometheus, Grafana, Loki, Alloy + OTLP
+├── observability/             # config da stack: scrape do Prometheus, Loki, Alloy e provisioning do Grafana
 ├── SatusBlockchain.sln
 └── README.md
 ```
@@ -230,7 +230,7 @@ Os três pilares, cada um com o seu caminho:
 
 | Pilar | Instrumentação | Caminho | Destino |
 |-------|----------------|---------|---------|
-| **Logs** | `ILogger` | console do container | `docker compose logs` |
+| **Logs** | `ILogger` | console do container → Docker API | Alloy → Loki → Grafana (com o overlay) / `docker compose logs` (sem ele) |
 | **Métricas** | `NodeTelemetry` (`Meter`) + instrumentação ASP.NET/HttpClient | `GET /metrics` (pull, formato Prometheus) | Prometheus → Grafana |
 | **Traces** | `ActivitySource` + spans automáticos (servidor e `HttpClient`) | OTLP (push), **só** se `OTEL_EXPORTER_OTLP_ENDPOINT` existir | Jaeger |
 
@@ -264,8 +264,16 @@ Os três pilares, cada um com o seu caminho:
   testes esperam a série aparecer antes de asserir.
 - **Stack** (overlay `docker-compose.observability.yml`, acionado com `-f` duplo): Jaeger
   (`cr.jaegertracing.io/jaegertracing/jaeger:2.21.0`, UI em `:16686`, API em `/api/v3/...`),
-  Prometheus (`:9090`, scrape de 5s dos três `:8080/metrics`) e Grafana (`:3000`, datasource
-  e dashboard provisionados). O `docker-compose.yml` base não é alterado.
+  Prometheus (`:9090`, scrape de 5s dos três `:8080/metrics`), Grafana (`:3000`, datasources e
+  dashboard provisionados), Loki (`grafana/loki:3.5.12`, `:3100`) e Alloy
+  (`grafana/alloy:v1.20.1`, coletor que faz push ao Loki lendo os containers pelo socket do
+  Docker). O `docker-compose.yml` base não é alterado.
+- **Logs: o filtro e os labels** — o Alloy descobre containers com
+  `discovery.docker` filtrando a label `com.docker.compose.project=satusblockchain` (só a
+  stack da aula entra na base) e um `discovery.relabel` converte os labels brutos
+  `__meta_docker_container_*` em labels consultáveis (`compose_project`, `compose_service`,
+  `container`) — sem esse passo o Loki recebe os logs **sem nenhum label de container**, e
+  todo LogQL vira varrer tudo.
 
 ## 11. Alternativas consideradas e descartadas
 

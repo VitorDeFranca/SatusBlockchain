@@ -143,12 +143,13 @@ docker compose up -d --force-recreate      # mineração instantânea
 
 ## Observabilidade
 
-O nó instrumenta os três pilares com **OpenTelemetry**: logs (o `ILogger`),
-métricas (`GET /metrics`, raspadas pelo **Prometheus** e exibidas no **Grafana**) e traces
-(enviados por OTLP ao **Jaeger** quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido).
+O nó instrumenta os três pilares com **OpenTelemetry**: logs (o `ILogger`, coletados pelo
+**Alloy** e enviados ao **Loki**), métricas (`GET /metrics`, raspadas pelo **Prometheus** e
+exibidas no **Grafana**) e traces (enviados por OTLP ao **Jaeger** quando
+`OTEL_EXPORTER_OTLP_ENDPOINT` está definido).
 
 ```powershell
-# stack completa: os 3 nós + Jaeger + Prometheus + Grafana (overlay; o compose base não muda)
+# stack completa: 3 nós + Jaeger + Prometheus + Grafana + Loki + Alloy (overlay; o compose base não muda)
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
 
 curl http://localhost:8080/metrics            # métricas do node1 (sempre disponível)
@@ -161,15 +162,22 @@ curl http://localhost:8080/metrics            # satus_blocks_mined_total{...} 1
 |---------|-----|---------------|
 | Jaeger | http://localhost:16686 | trace do `POST /blocks/mine` atravessando os 3 nós (serviços `node1/node2/node3`) |
 | Prometheus | http://localhost:9090 | targets `up`; query `satus_chain_length` por nó |
-| Grafana | http://localhost:3000 | dashboard **SatusBlockchain — Visão dos nós** (provisionado, acesso anônimo) |
+| Grafana | http://localhost:3000 | dashboard **SatusBlockchain — Visão dos nós** (provisionado, acesso anônimo); **Explore → Loki** para logs |
+| Loki | http://localhost:3100 | API de logs — `{compose_project="satusblockchain"}` |
 
 **Demo de trace:** mine no node1 → no Jaeger, `Service: node1` → operação
 `POST /blocks/mine` → um trace com o span `mine` (o PoW) e os spans `POST /blocks/receive`
 do **node2** e do **node3** — o `traceparent` atravessa a rede: é a prova visual de sistemas
 distribuídos, com um trace só para toda a propagação.
 
+**Demo de logs:** mine de novo → no Grafana, **Explore → datasource Loki** → LogQL
+`{compose_project="satusblockchain", container="node1"} |= "minerado"` → a linha
+`Bloco N minerado...`. O caminho é: `ILogger` → console do container → Docker → Alloy →
+Loki → Grafana (o Alloy só coleta os containers deste compose, por label do Docker).
+
 Sem o overlay, `docker compose up` continua sendo apenas os 3 nós: o `/metrics` segue
-disponível (é pull), mas nada é exportado — sem Jaeger, sem Prometheus.
+disponível (é pull), mas nada é exportado — sem Jaeger, sem Prometheus, e os logs ficam só
+no `docker compose logs`.
 
 > Detalhes, catálogo de métricas e decisões em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 > (seção 10) e [docs/ROADMAP.md](docs/ROADMAP.md) (notas da etapa 9).

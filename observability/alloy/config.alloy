@@ -1,0 +1,56 @@
+// Etapa 9 — coleta de LOGS: Alloy (sucessor do promtail, padrão Grafana) lê os
+// logs dos containers DOCKER via socket e envia ao Loki. É o caminho dos logs:
+// ILogger (console do container) → driver json-file → Docker API → Alloy → Loki → Grafana.
+//
+// Filtro: só os containers deste projeto (label do Compose) — outros containers da
+// máquina não entram na base da aula.
+
+discovery.docker "stack" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=satusblockchain"]
+  }
+}
+
+// Os labels __meta_* do discovery são descartados por padrão: é preciso um
+// discovery.relabel para convertê-los em labels reais (compose_project, container).
+discovery.relabel "stack" {
+  targets = discovery.docker.stack.targets
+
+  rule {
+    action        = "replace"
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+
+  rule {
+    action        = "replace"
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+
+  rule {
+    action        = "replace"
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    replacement   = "$1"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "stack" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.stack.output
+  labels        = { "job" = "docker" }
+  relabel_rules = discovery.relabel.stack.rules
+  forward_to    = [loki.write.loki.receiver]
+}
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
