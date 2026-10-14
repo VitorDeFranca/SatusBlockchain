@@ -14,6 +14,7 @@ execução local com Docker Compose.
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — requisitos e limites do projeto
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — arquitetura e decisões técnicas
 - [docs/ROADMAP.md](docs/ROADMAP.md) — etapas incrementais e status
+- [docs/apresentacao/index.html](docs/apresentacao/index.html) — slides da apresentação em sala (abra no navegador; roteiro de fala em [docs/apresentacao/ROTEIRO.md](docs/apresentacao/ROTEIRO.md))
 - [postman/README.md](postman/README.md) — roteiro de teste manual da API no Postman
 
 ## Estrutura
