@@ -17,7 +17,7 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 | 7 | Gossip de transações | `PeerClient.BroadcastTransactionAsync`, `/transactions/receive`, dedup na mempool | Replicação em duas camadas: mempool (estado local, sem consenso) x cadeia | ✅ |
 | 8 | Consenso e sync (pull) | `POST /sync`, longest chain rule, substituição de cadeia (reorg) | Consenso, consistência eventual, recuperação após falha | ✅ |
 | 9 | Observabilidade | OpenTelemetry: `GET /metrics` (Prometheus + Grafana) e traces (Jaeger) — logs já existiam | Os três pilares de observabilidade; telemetria como janela para o sistema distribuído | ✅ |
-| 10 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
+| 10 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ✅ |
 | 11 | Fechamento | README final, docs atualizados, roteiro de apresentação | — | ⬜ |
 
 ## Notas de ordenação
@@ -184,6 +184,33 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   node1 → node3 pelo `traceparent` (18 spans nos três serviços), o Jaeger listou os três
   serviços, o Prometheus reportou os 4 alvos `up` e o Loki entregou o log `Bloco N minerado…`
   com `container=node1`.
+- Etapa 10 (roteiro e scripts, sem código novo): a etapa transforma as demos manuais das
+  etapas 8–9 em algo executável na apresentação — `scripts/demo-fork.ps1` (30 verificações,
+  fork forçado e resolução), `scripts/demo-recuperacao.ps1` (17, queda e retorno) e o
+  roteiro `docs/DEMO-SCRIPT.md` (versão manual passo a passo, narrativa sugerida e plano B).
+  Nenhuma linha de C# mudou: push, `/sync`, `/blocks/mine` e o overlay das etapas 6–9 já
+  entregavam a funcionalidade; o que faltava era o roteiro determinístico que os prova.
+- Etapa 10 (por que a partição é `docker network disconnect`): o `docker pause` é a escolha
+  óbvia — pausa sem perder o estado em memória — mas foi **validado ao vivo e não cria
+  fork**: o nó pausado mantém o socket de escuta vivo no kernel, o `POST /blocks/receive`
+  fica na fila de aceitação e é ENTREGUE quando o processo descongela (o nó "cego" voltava
+  já em dia). O disconnect derruba o endpoint de verdade: sem rota, sem fila nenhuma para
+  sobreviver à reconexão, processo vivo e porta do host de volta ao normal. Alternativas
+  descartadas: override de compose com `PEERS: ""` (trocar env exige recreate e o estado
+  em memória zera no genesis, embaralhando a narrativa) e mineração simultânea (corrida
+  real de propagação, mas não determinística — já coberta pelos `SyncTests`).
+- Etapa 10 (a aritmética do fork): node1 precisa estar **estritamente** à frente — empate
+  de altura não adota (first-seen wins). Por isso a sequência minera 2 blocos no lado
+  isolado e o nó que volta minera só 1: fork no índice N, altura N+2 × N+1, e o sync tem o
+  que adotar. A transação T2 nasce **depois** da reconexão para que o gossip não a leve ao
+  lado vencedor — assim o bloco perdedor é órfão de verdade, a tx volta à mempool
+  (`orphansBackToMempool = 1`) e a re-mineração fecha a demonstração de fidelidade à origem
+  escolhida na etapa 8.
+- Etapa 10 (validação ao vivo): os dois scripts passaram nas duas execuções — com `-Fresh`
+  (baseline no genesis) e sem, sobre a stack viva (as asserções são relativas a N, a altura
+  atual). Bônus inesperado: o check de baseline **detectou e recusou** um fork de empate
+  legítimo que uma validação manual interrompida tinha deixado na stack (node2 com outro
+  topo, mesmas 13 alturas) e mandou usar `-Fresh` — exatamente o comportamento projetado.
 
 ## Cenário de demonstração final (referência para as etapas)
 
@@ -192,8 +219,15 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
    node1 → o bloco propaga para node2 e node3;
 3. validar a cadeia em todos os nós;
 4. derrubar o node3, minerar mais blocos nos demais;
-5. religar o node3 e sincronizá-lo (`POST /sync`, etapa 8);
-6. provocar um fork (isolar node3, minerar em ambos os lados);
-7. religar e observar a convergência pela longest chain rule;
+5. religar o node3 e sincronizá-lo (`POST /sync`, etapa 8) — ou rodar
+   `.\scripts\demo-recuperacao.ps1`, que automatiza 4–5 com verificação;
+6. provocar um fork (isolar um nó da rede, minerar em ambos os lados);
+7. religar e observar a convergência pela longest chain rule — ou rodar
+   `.\scripts\demo-fork.ps1`, que automatiza 6–7 (incluindo a transação órfã
+   voltando à mempool e sendo re-minerada no topo);
 8. (opcional, etapa 9) subir a stack de observabilidade e repetir 2–7 vendo as métricas
    mudarem no Grafana e o trace de cada mineração atravessando os três nós no Jaeger.
+
+> Os passos 4–7 viraram roteiro executável e documentado na etapa 10: ver
+> [docs/DEMO-SCRIPT.md](DEMO-SCRIPT.md) — com a narrativa sugerida, a versão manual
+> comando a comando e o mapeamento de cada passo para a observabilidade.
