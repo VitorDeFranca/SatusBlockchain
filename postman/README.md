@@ -1,206 +1,71 @@
-# Teste manual da API no Postman
+# Demo no Postman
 
-Roteiro do **nó único** (Etapa 4: `GET /chain`, `GET /chain/validate`,
-`POST /transactions`, `GET /transactions/pending`, `POST /blocks/mine`).
+A collection segue o [roteiro de apresentação](../docs/apresentacao/ROTEIRO.md).
+Cada pasta é um passo. O que falar, e o que apontar no Grafana, no Jaeger e
+no Loki, está no roteiro — aqui fica só a ordem de envio e o terminal que o
+Postman não substitui.
 
-## 1. Suba o nó
+## 1. Suba a stack
 
 ```powershell
 cd C:\Dev\Vitor\SatusBlockchain
-$env:NODE_ID = "node1"
-$env:DIFFICULTY = "2"      # 2 zeros no hash: mineração instantânea (4 = ~1s, o padrão)
-dotnet run --project src/SatusBlockchain.Node
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
+docker compose ps
 ```
 
-O nó sobe em **http://localhost:5165** (definido em
-`src/SatusBlockchain.Node/Properties/launchSettings.json`).
-No terminal aparece `Now listening on: http://localhost:5165`.
+Os três nós precisam estar `healthy`. Se a cadeia estiver suja de um ensaio,
+`docker compose restart node1 node2 node3` devolve os três ao genesis.
 
-> Use `DIFFICULTY=2` para testar no Postman: um bloco é minerado em milissegundos.
-> Se mudar para 4, ajuste também a variável `difficulty` do collection.
->
-> **Com Docker (etapas 5–6):** suba os 3 nós com `docker compose up -d` (em vez do `dotnet run`)
-> e troque a variável `baseUrl` do collection para o nó que quiser testar:
-> `http://localhost:8080` (node1), `http://localhost:8081` (node2) ou
-> `http://localhost:8082` (node3). A dificuldade dos containers vem de `NODE_DIFFICULTY`
-> (**padrão 4 = ~1s por bloco**) — ajuste `difficulty = 4` no collection para os testes de
-> Proof of Work baterem. Para mineração instantânea:
-> `$env:NODE_DIFFICULTY = "2"; docker compose up -d --force-recreate` (e volte `difficulty = 2`).
+## 2. Importe a collection
 
-## 2. Importe o collection
+No Postman: **Import** → `postman/SatusBlockchain.postman_collection.json`.
 
-No Postman: **Import** → arraste
-`postman/SatusBlockchain.postman_collection.json`.
+Se a collection antiga (requests 1–21, variável `baseUrl`) ainda estiver
+aberta, substitua por esta. O id é o mesmo.
 
-O collection já tem as variáveis:
-
-| Variável | Valor padrão | Para que serve |
+| Variável | Valor | Nó |
 |---|---|---|
-| `baseUrl` | `http://localhost:5165` | endereço do nó |
-| `difficulty` | `2` | testar o Proof of Work (`hash` começa com N zeros) |
+| `node1Url` | `http://localhost:8080` | node1 |
+| `node2Url` | `http://localhost:8081` | node2 |
+| `node3Url` | `http://localhost:8082` | node3 |
+| `node4Url` | `http://localhost:8083` | node4, só no passo 8 |
+| `difficulty` | `4` | zeros exigidos no hash (`0000`) |
 
-## 3. Execute na ordem 1 → 14
+Não usem o **Collection Runner**. As pastas 4, 5 e 8 param no meio para um
+comando de terminal, e o Runner não espera.
 
-| # | Request | O que observar |
-|---|---------|----------------|
-| 1 | `GET /` | nó de pé: `node`, `difficulty`, `blocks = 1`, `valid = true` |
-| 2 | `GET /chain` | só o genesis: `index 0`, `previousHash "0"`, `hash` já com N zeros |
-| 3 | `GET /chain/validate` | `valid: true`, `length: 1` |
-| 4 | `POST /transactions` | **201 Created** + `Location: /transactions/pending` |
-| 5 | `POST /transactions` | segunda transação (a mempool aceita várias) |
-| 6 | `GET /transactions/pending` | as 2 transações **ainda não** estão em bloco nenhum |
-| 7 | `POST /blocks/mine` | bloco `index 1`, com as 2 transações, PoW válido (4 ms na dificuldade 2; ~1 s na 4) |
-| 8 | `GET /transactions/pending` | **vazio** — as transações entraram no bloco |
-| 9 | `POST /transactions` (inválida) | **400 Bad Request** (`from` vazio, `amount <= 0`, etc.) |
-| 10 | `GET /chain` | cadeia com 2 blocos: cada `previousHash` igual ao `hash` do anterior |
-| 11 | `GET /peers` | peers configurados (`PEERS`) — vazio no `dotnet run` sem `PEERS`; com Docker, `http://node2:8080` e `http://node3:8080` |
-| 12 | `POST /transactions/receive` | entrega a transação como um **peer** faria (gossip): **200** entra na mempool; rodando de novo, **409** (dedup) |
-| 13 | `POST /sync` | **pull**: o nó pergunta a cadeia dos peers e adota a válida mais longa (request 4.1) |
-| 14 | `GET /metrics` | métricas do nó em formato **Prometheus**: gauge `satus_chain_length` com o tamanho atual; após o request 7, o counter `satus_blocks_mined_total` |
+Enviem de cima para baixo. O teste verde confirma o campo que a narrativa
+cita (mesmo `latestHash`, 400, 201, órfã de volta na mempool). Vermelho quase
+sempre quer dizer que o request anterior, ou o `docker` do meio do passo,
+foi pulado.
 
-## 4. Propagação entre os nós (etapa 6)
+## 3. Ordem
 
-O roteiro acima testa **um** nó. Para ver a propagação, suba os 3 containers
-(`docker compose up -d --build`) e deixe o `baseUrl` no `node1`:
-
-1. `POST /transactions` (request 4) → a transação entra na mempool do node1;
-2. `POST /blocks/mine` (request 7) → ~1s de PoW e o bloco é **enviado aos peers**
-   (`POST /blocks/receive`) ainda dentro da mesma requisição;
-3. troque `baseUrl` para `http://localhost:8081` e chame `GET /` (request 1) e
-   `GET /chain` (request 2): o node2 já mostra o mesmo bloco, com o **mesmo hash**;
-4. repita com `http://localhost:8082` (node3) e com `GET /peers` (request 11).
-
-O resultado do push (aceito / recusado / inacessível) fica no log do nó que minerou:
-
-```powershell
-docker compose logs -f node1
-```
-
-**Peer offline:** com `docker compose stop node3`, o `POST /blocks/mine` continua
-respondendo **200** — a mineração local não depende dos peers — e o log mostra
-`Peer http://node3:8080 inacessível`. Ao religar (`docker compose start node3`), o node3
-volta ao genesis e **não** se recupera sozinho: ele recusa os blocos seguintes com **409**
-(índice/elo fora de sequência). É exatamente o que o `POST /sync` da etapa 8 resolve.
-
-**Reenvio e adulteração:** `POST /blocks/receive` com um bloco que o nó já tem — ou com o
-conteúdo alterado — responde **409** e não mexe na cadeia. Para testar, copie um bloco de
-`GET /chain` de um nó e cole no corpo de `POST {{baseUrl}}/blocks/receive` do outro.
-
-**Gossip de transações:** postar a transação no `node1` (request 4) a faz aparecer em
-`GET /transactions/pending` (request 6) do `node2` e do `node3` — cada nó com a **sua** mempool,
-alimentada pelo repasse. E o bloco pode ser minerado em **outro** nó: troque `baseUrl` para
-`http://localhost:8082` antes do request 7 e a transação que nasceu no node1 entra no bloco
-minerado pelo node3. A request 12 entrega uma transação direto no endpoint de gossip, como um
-peer faria (rodando duas vezes, a segunda responde 409 por dedup).
-
-### 4.1 Sincronização de um nó atrasado (etapa 8)
-
-O push (request 7) resolve o nó em dia; o **pull** resolve o nó que ficou para trás. Com os
-containers no ar, o roteiro é:
-
-```powershell
-docker compose stop node3                    # o nó cai e perde a memória
-curl -X POST http://localhost:8080/blocks/mine    # node1 mineia; o node2 recebe por push
-curl -X POST http://localhost:8080/blocks/mine
-docker compose start node3                   # volta só com o genesis
-```
-
-Depois, troque a URL da request 13 para `{{node3Url}}` e envie: o node3 puxa a cadeia dos
-peers, adota a mais longa e passa a mostrar os mesmos blocos (`GET /chain` com a mesma
-impressão digital do node1). A resposta traz `adopted` e `orphansBackToMempool` — este último
-aparece quando o nó tinha um bloco próprio que perdeu: as transações órfãs voltam para
-`GET /transactions/pending` (request 6).
-
-### 4.2 Métricas do nó
-
-O request 14 lê `GET /metrics` — o mesmo endpoint que o Prometheus raspa. No texto de saída:
-
-- `satus_chain_length{otel_scope_name="..."} 1` — gauge com o tamanho **atual** da cadeia;
-- `satus_blocks_mined_total{...} 1` — counter que **nasce** na primeira mineração;
-- `# TYPE ... gauge` / `# TYPE ... counter` — metadados que o Prometheus usa ao importar.
-
-Os valores vêm com labels no meio (`{otel_scope_name=...}`): é a convenção do formato
-Prometheus, não um erro na URL. Depois de minerar, o valor pode levar ~2s para refletir — a
-leitura tem um pequeno atraso assíncrono que o Prometheus (raspagem de 5s) nem percebe.
-
-Com a stack de observabilidade no ar
-(`docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d`), as
-mesmas séries alimentam o dashboard do Grafana (`localhost:3000`) e a mineração gera trace no
-Jaeger (`localhost:16686`) — roteiro completo na seção "Observabilidade" do README.
-
-### 4.3 Observabilidade via API (requests 15–21)
-
-Os sete requests a seguir cobrem os **três pilares** de ponta a ponta. Rode o request 7
-(minerar) antes deles — cada teste avisa o que falta se algo vier vazio.
-
-| # | O que prova | Backend |
+| Pasta | Enviar | Terminal no meio |
 |---|---|---|
-| 15 | O Prometheus **consultou** `satus_chain_length` (funcionou o pull) | Prometheus `:9090` |
-| 16 | Os 4 alvos de scrape estão `health=up` (3 nós + ele mesmo) | Prometheus `:9090` |
-| 17 | `node1/2/3` exportaram traces como serviços distintos | Jaeger `:16686` |
-| 18 | O trace do `POST /blocks/mine` cruza os 3 nós (traceparent) | Jaeger `:16686` |
-| 19 | O Loki só coleta os containers deste compose | Loki `:3100` |
-| 20 | Os logs chegam com `container=node1` e incluem "minerado" | Loki `:3100` |
-| 21 | Grafana no ar com as 2 datasources provisionadas | Grafana `:3000` |
+| **0. Baseline** | `0.1` … `0.7` | — |
+| **1. Transação inválida** | `1.1` | — |
+| **2. Gossip da mempool** | `2.1` … `2.4` | — |
+| **3. Mineração** | `3.1` … `3.5` | — O `3.1` demora ~1 s. |
+| **4. Queda do node3** | `4.1` … `4.5`, depois `4.6` … `4.9` | Antes do `4.1`: `docker compose stop node3`. O `4.1` tem de falhar. Antes do `4.6`: `docker compose start node3` e esperar `healthy`. |
+| **5. Partição** | `5.1` … `5.5`, depois `5.6` | Antes do `5.1`: `docker network disconnect satusblockchain_satus-net node2`. Cada mine demora ~3 s. Antes do `5.6`: `docker network connect satusblockchain_satus-net node2`. |
+| **6. Fork** | `6.1` … `6.4` | — O `6.4` compara com a cadeia gravada pelo `6.3`. |
+| **7. Reorg** | `7.1` … `7.6` | — |
+| **8. Nó novo** | `8.1` … `8.3` | Antes: o `docker run` do roteiro. Ao sair: `docker rm -f node4`. |
 
-Detalhes que valem a pena saber antes de rodar:
+Grafana, Jaeger e Loki ficam no navegador, não nesta collection. O Explore
+do Loki só aparece depois do login **admin** / **admin**.
 
-- **Request 18 tem pre-request script**: a API v3 do Jaeger exige `query.startTimeMin/Max`
-  em RFC3339 — a janela da última hora é calculada ali, não fixada na URL. Ele também filtra
-  `operation_name=POST /blocks/mine` porque o Prometheus raspa o `/metrics` a cada 5s e esses
-  traces de scrape afogariam o resultado (o limit voltaria sempre scrape).
-- **Formato da resposta v3**: diferente do v2 antigo, os spans vêm no formato OTLP
-  (`result.resourceSpans[].scopeSpans[].spans[]`) — é o que o teste do request 18 desmonta,
-  lendo o `service.name` de cada resource para detectar o cruzamento entre nós.
-- **LogQL do request 20**: `{compose_project="satusblockchain"} | = ...` — o mesmo filtro
-  funciona colado no **Explore** do Grafana (datasource Loki), que é a forma visual de
-  investigar.
-
-## 5. Rodar tudo de uma vez (Collection Runner)
-
-No collection, clique em **Run** → **Run SatusBlockchain**. O Postman executa
-os requests em ordem e mostra os testes (verde/vermelho) de cada um.
-
-Isso é o mesmo que os **testes de integração** automatizados fazem
-(`tests/SatusBlockchain.Node.Tests/Integration/ApiTests.cs`), com uma diferença: o
-Postman precisa do nó já rodando e de alguém clicando; o teste em C# sobe o
-próprio nó, escolhe uma porta livre, faz os mesmos requests e roda com
-`dotnet test --filter "FullyQualifiedName~Tests.Integration"` (~20s).
-
-## 6. Se preferir sem Postman (PowerShell)
-
-```powershell
-$base = "http://localhost:5165"
-
-# objetos simples: Invoke-RestMethod basta
-Invoke-RestMethod "$base/" | Format-List
-Invoke-RestMethod "$base/chain/validate" | Format-List
-
-# criar transacoes (vão para a mempool)
-Invoke-RestMethod "$base/transactions" -Method Post -ContentType "application/json" `
-  -Body '{"from":"alice","to":"bob","amount":10}'
-
-Invoke-RestMethod "$base/blocks/mine" -Method Post | Format-List
-
-# listas: pegue o corpo cru e converta, para não perder os itens
-((Invoke-WebRequest -UseBasicParsing "$base/chain").Content | ConvertFrom-Json).Count
-((Invoke-WebRequest -UseBasicParsing "$base/transactions/pending").Content)
-```
-
-> **Pegadinha do Windows PowerShell 5.1:** `Invoke-RestMethod` embrulha um array
-> JSON em um único objeto — `$r.Count` de um `/chain` com 2 blocos responde `1`
-> e `$r[0]` devolve a lista inteira, o que confunde na hora de conferir.
-> O servidor está correto (o corpo cru mostra `[{...},{...}]`): para arrays, use
-> `(Invoke-WebRequest -UseBasicParsing <url>).Content | ConvertFrom-Json`.
-
-## 7. Erros comuns
+## 4. Erros comuns
 
 | Sintoma | Causa provável |
 |---|---|
-| `Unable to connect` no Postman | o nó não está rodando, ou a porta não é 5165 (`ASPNETCORE_URLS` diferente) |
-| Nó encerra na subida com "DIFFICULTY inválida" | `DIFFICULTY` fora de 0–64 |
-| `POST /blocks/mine` retorna **409** | a cadeia mudou durante a mineração (outro bloco entrou). É proposital: as transações continuam na memória; mine de novo |
-| Teste do PoW falhando | variável `difficulty` do collection diferente do `DIFFICULTY` do nó |
-| `POST /blocks/receive` retorna **409** | o bloco não estende a cadeia local: duplicado (já está na cadeia), órfão (índice fora de sequência — nó que ficou para trás) ou adulterado (hash/PoW não conferem) |
-| Bloco minerado não aparece no outro nó | o nó não tem o peer em `PEERS` (veja `GET /peers`), os nós estão com **dificuldades diferentes**, ou o outro nó reiniciou e voltou ao genesis — nesse caso ele recusa tudo com 409 até o `POST /sync` da etapa 8 |
-| `POST /transactions/receive` retorna **409** | a transação já está pendente na mempool local (dedup) ou já está **confirmada** em um bloco — nenhum dos dois é erro: é o gossip chegando duas vezes |
+| `Unable to connect` no `0.1` | a stack não está no ar, ou a porta não é 8080 |
+| `4.1` responde 200 | `docker compose stop node3` não rodou |
+| `4.6` não conecta | o node3 ainda não ficou `healthy` |
+| `5.1` demora ~3 s e mesmo assim volta 200 | é o timeout do peer mudo, não um travamento |
+| Teste de “mesmo latestHash” vermelho | o validate do node1 daquela pasta não foi enviado antes |
+| Teste do PoW vermelho | `difficulty` da collection diferente do `NODE_DIFFICULTY` dos containers |
+| `POST /blocks/mine` retorna **409** | outro bloco entrou durante a mineração; as transações continuam na mempool, mine de novo |
+| `6.4` não acha o índice | o `6.3` não foi enviado nesta passagem |
+| `7.2` sem carol → dave | o `6.2` não minerou essa transação, ou o `7.1` não adotou |

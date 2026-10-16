@@ -7,31 +7,7 @@ com configurações diferentes via Docker Compose. A distribuição do sistema v
 **replicação do processo**, não de microsserviços: cada nó é autônomo, mantém sua própria
 cópia da blockchain em memória e se comunica com os demais por HTTP/REST.
 
-```
-┌───────────────────────────────────────────────┐
-│              SatusBlockchain.Node             │
-│                                               │
-│  ┌──────────┐    ┌─────────────────────────┐  │
-│  │ REST API │───▶│ Blockchain (em memória) │  │
-│  │(Minimal  │    │ - List<Block> + lock    │  │
-│  │  APIs)   │    │ - Validate()            │  │
-│  └────┬─────┘    │ - ReplaceChain()        │  │
-│       │          └───────────▲─────────────┘  │
-│       │                      │                │
-│       │          ┌───────────┴────────────┐   │
-│       │          │ Hasher / ProofOfWork   │   │
-│       │          └────────────────────────┘   │
-│       │          ┌────────────────────────┐   │
-│       │          │ Mempool (pendentes)    │   │
-│       │          └────────────────────────┘   │
-│       │                                       │
-│       │          ┌────────────────────────┐   │
-│       └─────────▶│ PeerClient (HttpClient)│───┼──▶ outros nós
-│                  └────────────────────────┘   │
-└───────────────────────────────────────────────┘
-```
-
-### Implantação com Docker Compose (etapa 5)
+### Implantação com Docker Compose
 
 Uma **única imagem** (`satus-node:local`), construída por um `Dockerfile` multi-stage —
 `sdk:10.0` no estágio de build (compila e publica) e `aspnet:10.0` no estágio final
@@ -44,20 +20,15 @@ Cada container é um processo isolado, com seu próprio estado em memória.
 | `node2` | `node2` | `localhost:8081` | `http://node2:8080` |
 | `node3` | `node3` | `localhost:8082` | `http://node3:8080` |
 
-Na rede bridge `satus-net`, o **nome do serviço resolve para o container** (DNS interno do
-Docker): é esse endereço que as etapas 6 (push) e 7 (pull/`/sync`) usam para falar nó a nó.
-O container escuta na 8080 (padrão das imagens ASP.NET desde o .NET 8);
-o `HEALTHCHECK` bate em `GET /`, então `docker compose ps` mostra `healthy` quando o nó
-está de fato pronto (e não apenas com a porta aberta).
-
 ## 2. Estrutura de diretórios
 
 ```
 SatusBlockchain/
 ├── docs/
-│   ├── REQUIREMENTS.md        # requisitos e limites do projeto
-│   ├── ARCHITECTURE.md        # este documento
-│   └── ROADMAP.md             # etapas incrementais e status
+│   ├── BLOCKCHAIN-FUNDAMENTOS.md  # conceitos usados pelo projeto
+│   ├── ARCHITECTURE.md            # este documento
+│   └── apresentacao/              # slides (index.html) e roteiro de fala (ROTEIRO.md)
+├── postman/                       # collection da demo e a ordem de envio
 ├── src/
 │   └── SatusBlockchain.Node/
 │       ├── Core/              # domínio: Block, Transaction, Blockchain, Mempool, Hasher, ProofOfWork
@@ -78,6 +49,19 @@ SatusBlockchain/
 └── README.md
 ```
 
+### Testes
+
+Um projeto só, `tests/SatusBlockchain.Node.Tests`, com uma pasta e um namespace por tipo.
+Os comandos estão no README.
+
+- **Unidade** (`Unit/`, namespace `Tests.Unit`): `Block`, `Hasher`, `ProofOfWork`,
+  `Blockchain`, `Mempool`, `NodeOptions`, `PeerClient` e `NodeTelemetry`. Classes isoladas,
+  sem rede e sem subir processo.
+- **Integração** (`Integration/`, namespace `Tests.Integration`): sobe o executável numa
+  porta livre e conversa por HTTP. Cobre rotas, status codes, `NODE_ID`/`DIFFICULTY`,
+  o fluxo mempool → bloco, o push de blocos, o gossip de transações, o `/sync` e as
+  métricas. Um processo novo por teste.
+
 ## 3. Componentes e responsabilidades
 
 | Componente | Responsabilidade | Não faz |
@@ -92,38 +76,32 @@ SatusBlockchain/
 | `NodeTelemetry` | Instrumentação: contadores/gauges `satus.*` e spans próprios `mine`/`sync` | exportar (papel do pipeline OpenTelemetry do `Program.cs`) ou gravar logs |
 | Endpoints | Exposição REST do nó | lógica de domínio |
 
-## 4. Modelo de dados
+### Endpoints
 
-### Bloco
+| Endpoint | Descrição |
+|----------|-----------|
+| `GET /` | Identidade, dificuldade, tamanho e validade da cadeia |
+| `GET /chain` | Cadeia completa do nó |
+| `GET /chain/validate` | Valida encadeamento, hashes e Proof of Work |
+| `POST /transactions` | Adiciona transação à mempool e propaga aos peers (gossip) |
+| `GET /transactions/pending` | Transações aguardando mineração (visão local do nó) |
+| `POST /transactions/receive` | Recebe uma transação propagada (200 aceita; 409 duplicada ou já confirmada) |
+| `POST /blocks/mine` | Minera um bloco com a mempool e propaga aos peers (push) |
+| `POST /blocks/receive` | Recebe um bloco propagado (200 aceito; 409 se não estende a cadeia) |
+| `GET /peers` | Peers configurados (`PEERS`) |
+| `POST /sync` | Puxa a cadeia dos peers e adota a válida mais longa |
+| `GET /metrics` | Métricas do nó no formato Prometheus |
 
-```
-Block {
-  Index: long            // posição na cadeia (genesis = 0)
-  Timestamp: DateTimeOffset
-  Transactions: Transaction[]
-  PreviousHash: string   // hash do bloco anterior (hex)
-  Nonce: long            // solução do Proof of Work
-  Hash: string           // SHA-256 do conteúdo acima (hex)
-}
-```
-
-### Hashing canônico
-
-O hash é calculado sobre a serialização JSON **com campos em ordem fixa** de
-`{ Index, Timestamp, Transactions, PreviousHash, Nonce }` — o campo `Hash`
-nunca participa do próprio cálculo. Sem canonicalização, o mesmo bloco poderia
-gerar hashes diferentes em nós diferentes.
-
-## 5. Proof of Work
+## 4. Proof of Work
 
 - Dificuldade = número de zeros hexadecimais iniciais exigidos no hash.
 - Configurável por variável de ambiente (`DIFFICULTY`, padrão 4 → ~65k tentativas, ~1s).
 - Mineração = incrementar `Nonce` até `Hasher.ComputeHash(block)` satisfazer a dificuldade.
 - Verificação = recomputar o hash do bloco e conferir o prefixo.
 
-## 6. Comunicação entre nós
+## 5. Comunicação entre nós
 
-### Push (propagação) — etapa 6
+### Push (propagação)
 
 - `POST /blocks/mine` mina, propaga e **só então** responde: quando a resposta chega, os
   peers já receberam o bloco (é o que torna a demo e os testes determinísticos).
@@ -141,7 +119,7 @@ gerar hashes diferentes em nós diferentes.
 - Não há emissor autenticado: quem recusa bloco ruim é a validação do domínio
   (hash recalculado + PoW), não a boa vontade do remetente.
 
-### Gossip de transações — etapa 7
+### Gossip de transações
 
 - `POST /transactions` grava na mempool local **e** propaga a transação aos peers
   (`POST /transactions/receive`), aguardando o envio antes de responder (mesmo critério da
@@ -157,7 +135,7 @@ gerar hashes diferentes em nós diferentes.
   transações confirmadas.
 - Escopo: gossip de **1 hop** (o receptor não re-propaga) e sem taxa, priorização ou evicção.
 
-### Pull (sincronização) — etapa 8
+### Pull (sincronização)
 
 - `POST /sync` consulta `GET /chain` de cada peer (`PeerClient.GetChainsAsync`, em paralelo e
   com o mesmo timeout de 2 s) e aplica a **longest chain rule**. É o mecanismo que recupera o
@@ -174,16 +152,7 @@ gerar hashes diferentes em nós diferentes.
 - O sync é **manual**: não há `BackgroundService` consultando os peers sozinho. Deixa explícito
   quem decide sincronizar e mantém a demonstração e os testes determinísticos.
 
-### Peers estáticos
-
-- Lidos no startup da variável `PEERS` (URLs separadas por vírgula) e **validados na
-  subida**: entrada que não seja URL http(s) absoluta derruba o nó com mensagem clara.
-  Espaços e barra final são normalizados e repetições descartadas
-  (`NodeOptions.ParsePeers`).
-- Pré-requisito do push: **mesma dificuldade** em todos os nós — o genesis é minerado na
-  dificuldade do nó, então dificuldades diferentes geram cadeias incompatíveis.
-
-## 7. Consenso
+## 6. Consenso
 
 **Longest chain rule**: uma cadeia recebida substitui a local se, e somente se:
 1. for válida (encadeamento de hashes + PoW de todos os blocos); e
@@ -203,13 +172,13 @@ poderá ser confirmada em um bloco futuro — o que também permite demonstrar a
 o conceito de finalidade probabilística (uma confirmação pode ser desfeita por um
 reorg; quanto mais blocos sobre ela, mais segura).
 
-## 8. Concorrência
+## 7. Concorrência
 
 `Blockchain` e `Mempool` são protegidos por `lock`. A API é inerentemente concorrente
 (ASP.NET), e blocos podem chegar por dois caminhos simultâneos (mineração local e
 recebimento via push). Locks simples são suficientes no volume didático do projeto.
 
-## 9. Configuração por nó
+## 8. Configuração por nó
 
 | Variável | Exemplo | Descrição |
 |----------|---------|-----------|
@@ -224,7 +193,7 @@ No `docker-compose.yml`, a dificuldade dos três containers vem de `NODE_DIFFICU
 exclusivo do compose de propósito: um `DIFFICULTY` deixado no shell (usado pelo
 `dotnet run`) não pode mais alterar os containers sem querer.
 
-## 10. Observabilidade
+## 9. Observabilidade
 
 Os três pilares, cada um com o seu caminho:
 
@@ -274,14 +243,3 @@ Os três pilares, cada um com o seu caminho:
   `__meta_docker_container_*` em labels consultáveis (`compose_project`, `compose_service`,
   `container`) — sem esse passo o Loki recebe os logs **sem nenhum label de container**, e
   todo LogQL vira varrer tudo.
-
-## 11. Alternativas consideradas e descartadas
-
-| Alternativa | Motivo do descarte |
-|-------------|--------------------|
-| Controllers MVC | Minimal APIs têm menos cerimônia com a mesma clareza |
-| Mineração em background | Remove o controle didático; dificulta reproduzir forks |
-| Descoberta dinâmica de peers / gossip | Complexidade sem ganho proporcional para 3 nós |
-| Assinatura digital de transações | Escopo de criptomoeda, não de sistemas distribuídos |
-| Persistência (SQLite/arquivo) | Estado em memória já atende; a falta de persistência facilita a demo de recuperação |
-| gRPC / message broker | REST + BCL resolvem; menos dependências para explicar |

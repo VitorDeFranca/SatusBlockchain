@@ -43,6 +43,5 @@ Mesmo nesse caso:
 ## Contexto
 
 O usuário revisa e envia as mudanças pelo painel **Source Control** do VS Code —
-o `git push` deste terminal fica preso no login do Credential Manager. E, conforme
-`docs/ROADMAP.md`, cada etapa termina com **pausa para aprovação**, não com
-commit automático.
+o `git push` deste terminal fica preso no login do Credential Manager. Cada etapa
+termina com pausa para aprovação, antes de qualquer commit.

@@ -152,7 +152,7 @@
         <div class="card"><strong>03</strong><span>Gossip, forks, reorg, convergência.</span></div>
         <div class="card"><strong>04</strong><span>Jaeger, Grafana — e três roteiros de falha.</span></div>
       </div>
-      <aside>15 minutos de conceito, 8 a 10 de demo. Se o tempo apertar, pulam métricas e rodam só o script de fork.</aside>
+      <aside>15 minutos de conceito, 8 a 10 de demo. Se o tempo apertar, pulam métricas e vão direto à partição.</aside>
     </section>
 
     <section class="slide">
@@ -393,7 +393,7 @@
         <li>Integração: sobe o executável real em porta livre e fala HTTP.</li>
         <li>2–3 nós no mesmo teste: gossip, push, fork, sync, peer morto.</li>
       </ul>
-      <aside>Se perguntarem qualidade: a demo de fork tem 30 asserções; a de recuperação, 17. Não é só curl na aula.</aside>
+      <aside>Se perguntarem qualidade: a integração sobe o executável real. Não é só curl na aula.</aside>
     </section>
 
     <section class="slide">
@@ -405,7 +405,7 @@
         <div class="card"><strong>Grafana · :3000/d/satus-nos</strong><span>Altura e mempool por nó. Esperar 5 s após o comando.</span></div>
         <div class="card"><strong>Loki · Explore</strong><span>A linha que o processo escreveu: minerado, inacessível, Cadeia adotada.</span></div>
       </div>
-      <p class="tiny">Roteiro passo a passo: docs/apresentacao/ROTEIRO.md — não usem os scripts no caminho feliz; eles passam rápido demais para a turma ver a curva.</p>
+      <p class="tiny">Roteiro passo a passo: docs/apresentacao/ROTEIRO.md.</p>
       <aside>Saiam dos slides. Um no terminal, o outro nas abas. Ctrl+Tab: Grafana, Jaeger, Loki.</aside>
     </section>
 
@@ -422,7 +422,7 @@
       </div>
       <p class="lead">Ele volta no genesis. Um pull reconstrói. A rede não esperou o morto.</p>
       <p class="tiny">Grafana: alvo do node3 some, depois a curva salta de 1 para N. &nbsp;·&nbsp; Jaeger: POST /sync do node3, span adopted. &nbsp;·&nbsp; Loki: inacessível, depois Cadeia adotada.</p>
-      <aside>Passo 4 do roteiro. Prometheus /targets mostra o DOWN. Não rodem o script — o salto da curva precisa ser visto acontecendo.</aside>
+      <aside>Passo 4 do roteiro. Prometheus /targets mostra o DOWN. O salto da curva precisa ser visto acontecendo.</aside>
     </section>
 
     <section class="slide">
@@ -479,7 +479,7 @@
         <div class="card"><strong>Sync manual</strong><span>Quem decide sincronizar fica visível no roteiro.</span></div>
         <div class="card"><strong>Sem broker</strong><span>Gossip entre pares cobre a comunicação assíncrona.</span></div>
       </div>
-      <aside>Assinatura, saldo, persistência, TLS: fora de escopo no REQUIREMENTS.md. Não são sistemas distribuídos; são outra disciplina.</aside>
+      <aside>Assinatura, saldo, persistência, TLS: fora de escopo em docs/ARCHITECTURE.md, seção 12. Não são sistemas distribuídos; são outra disciplina.</aside>
     </section>
 
     <section class="slide center">
