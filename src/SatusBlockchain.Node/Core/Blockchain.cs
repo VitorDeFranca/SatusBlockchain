@@ -6,7 +6,7 @@ namespace SatusBlockchain.Node.Core;
 ///
 /// Thread-safe por <c>lock</c>: blocos podem chegar de três fontes — mineração local,
 /// propagação de outro nó (etapa 6) e substituição pela cadeia mais longa que um peer
-/// manda no <c>POST /sync</c> (etapa 8).
+/// manda no <c>POST /sync</c> (etapa 8, também disparado quando um nó entra na rede).
 /// </summary>
 public class Blockchain
 {
@@ -27,12 +27,21 @@ public class Blockchain
     /// <summary>Dificuldade do Proof of Work usada por este nó.</summary>
     public byte Difficulty { get; }
 
+    /// <summary>
+    /// Hash do genesis — a "certidão de nascimento" da rede. Nunca muda: nem o reorg troca
+    /// o genesis (<see cref="TryReplaceChain"/> exige o mesmo). Na etapa 10 é o que o
+    /// handshake compara antes de aceitar um nó novo: genesis diferente = outro universo.
+    /// </summary>
+    public string GenesisHash { get; }
+
     public Blockchain(byte difficulty = ProofOfWork.DefaultDifficulty)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThan(difficulty, ProofOfWork.MaxDifficulty);
 
         Difficulty = difficulty;
-        _chain.Add(CreateGenesisBlock(difficulty));
+        var genesis = CreateGenesisBlock(difficulty);
+        GenesisHash = genesis.Hash;
+        _chain.Add(genesis);
     }
 
     public int Length

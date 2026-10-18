@@ -17,14 +17,16 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 | 7 | Gossip de transações | `PeerClient.BroadcastTransactionAsync`, `/transactions/receive`, dedup na mempool | Replicação em duas camadas: mempool (estado local, sem consenso) x cadeia | ✅ |
 | 8 | Consenso e sync (pull) | `POST /sync`, longest chain rule, substituição de cadeia (reorg) | Consenso, consistência eventual, recuperação após falha | ✅ |
 | 9 | Observabilidade | OpenTelemetry: `GET /metrics` (Prometheus + Grafana) e traces (Jaeger) — logs já existiam | Os três pilares de observabilidade; telemetria como janela para o sistema distribuído | ✅ |
-| 10 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
-| 11 | Fechamento | README final, docs atualizados, roteiro de apresentação | — | ⬜ |
+| 10 | Membros dinâmicos | `PeerRegistry` (lista viva), `POST`/`DELETE /peers` com handshake, `MembershipService` (entra ao subir, sai ao desligar), detecção de falha, re-propagação, `scripts/add-node.ps1` / `remove-node.ps1`, Prometheus com descoberta pelo Docker | Membership, seed nodes, detecção de falha, gossip multi-hop, consistência eventual da visão da rede | 🚧 |
+| 11 | Fork e convergência | Roteiro e scripts de demo: fork forçado e resolução | Partição de rede, forks, convergência | ⬜ |
+| 12 | Fechamento | README final, docs atualizados, roteiro de apresentação | — | ⬜ |
 
 ## Notas de ordenação
 
-- Testes acompanham as etapas 1–9 (não são etapa separada): **unidade** para o domínio, para
-  o `PeerClient` e para a telemetria (etapas 1–3, 6, 7 e 9) e **integração HTTP** para a API
-  (etapas 4, 6–9), subindo o nó real em um processo isolado, em porta livre.
+- Testes acompanham as etapas 1–10 (não são etapa separada): **unidade** para o domínio, para
+  o `PeerClient`, para a telemetria e para o `PeerRegistry` (etapas 1–3, 6, 7, 9 e 10) e
+  **integração HTTP** para a API (etapas 4, 6–10), subindo o nó real em um processo isolado,
+  em porta livre.
 - Os testes ficam em **um projeto só** (`tests/SatusBlockchain.Node.Tests`), com uma pasta
   por tipo: `Unit/` (domínio isolado, sem rede) e `Integration/` (sobe o nó e conversa por
   HTTP). Os namespaces `…Tests.Unit` / `…Tests.Integration` permitem rodar só um conjunto:
@@ -64,7 +66,7 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   decisão que torna demo e testes determinísticos: quando o mine responde, os peers já têm
   o bloco. O timeout do cliente HTTP é 2 s e cada envio é isolado: peer offline/mudo vira
   log de aviso + `inacessível`, nunca exceção. O receptor **não** re-propaga (sem cascata:
-  com as listas completas de `PEERS`, um hop alcança os 3 nós).
+  com as listas completas de `PEERS`, um hop alcança os 3 nós) — regra revista na etapa 10.
 - Etapa 6 (contrato do recebimento): `POST /blocks/receive` aceita o **bloco cru** — o mesmo
   shape de um item de `GET /chain`, o que permite copiar um bloco de um nó e postar no
   outro — e responde **200** ao anexar, **409** quando o bloco não estende a cadeia local
@@ -112,7 +114,7 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   (reenviar não é erro de quem postou — e não há reanúncio, porque os peers já foram avisados
   na primeira vez); o **409** fica do lado do peer, que é quem reenvia algo que já temos. Como
   na etapa 6, o gossip é **aguardado** antes de responder, para demo e testes determinísticos.
-- Etapa 7 (escopo): gossip de **1 hop** (o receptor não re-propaga: com `PEERS` completos, um
+- Etapa 7 (escopo — o 1 hop foi revisto na etapa 10): gossip de **1 hop** (o receptor não re-propaga: com `PEERS` completos, um
   hop alcança os três nós) e sem taxa, priorização, evicção ou expiração — o foco é o conceito
   de replicação de estado, não política de mempool.
 - Etapa 8 (pull): `POST /sync` lê `GET /chain` de cada peer em paralelo
@@ -185,6 +187,66 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
   serviços, o Prometheus reportou os 4 alvos `up` e o Loki entregou o log `Bloco N minerado…`
   com `container=node1`.
 
+- Etapa 10 (membros dinâmicos — o porquê): até a 9, os nós eram três containers escritos no
+  compose e a lista de cada um era o `PEERS` da subida. Acrescentar ou tirar um nó exigia
+  editar o compose e reiniciar todos. Agora a lista é **estado** de cada nó (`PeerRegistry`,
+  sementes de `PEERS` + quem entra − quem sai), local e sem consenso — o mesmo modelo da
+  mempool da etapa 7, aplicado à visão da rede.
+- Etapa 10 (entrar): um nó com `ADVERTISE_URL` (o endereço pelo qual os outros o chamam — o
+  processo não tem como descobri-lo sozinho dentro do Docker) se anuncia às sementes
+  (`POST /peers`), recebe delas a lista de peers conhecidos, anuncia-se a cada um (busca em
+  largura: basta UMA semente) e **sincroniza** a cadeia — o push não reenvia o passado. O
+  anúncio sai no `ApplicationStarted`, depois de a porta abrir, porque quem recebe o anúncio
+  chama o nó de volta.
+- Etapa 10 (handshake): `POST /peers` só registra depois de chamar de volta o endereço
+  anunciado (`GET /`, que ganhou o campo `genesis`): **502** se não responde, **409** se o
+  genesis é outro (dificuldade diferente = outro universo — a mesma armadilha registrada na
+  etapa 6, agora barrada na porta) ou se o `NODE_ID` é repetido, **400** para URL inválida ou o
+  próprio endereço, **503** com a lista cheia (32). A resposta leva o genesis de quem respondeu,
+  então o recém-chegado confere do lado dele também.
+- Etapa 10 (sair): `docker stop` → SIGTERM → `StopAsync` → `DELETE /peers?url=...` a todos
+  (despedida). `docker kill` não avisa ninguém: cada chamada sem resposta conta contra o peer
+  e, na **3ª seguida**, ele sai da lista (uma resposta qualquer, até um 409, zera a conta). As
+  **sementes nunca saem por falha** — são o caminho de volta depois de uma queda ou partição.
+  Quem caiu e voltou se reanuncia ao subir (ou no `POST /sync`, que passou a reanunciar).
+- Etapa 10 (o fim do 1 hop): com listas que mudam em execução, nem todo nó conhece todos —
+  o 1 hop das etapas 6–7 deixaria nós de fora. Quem **aceita** um bloco ou transação de um
+  peer passa a repassá-lo; o dedup que já existia (409 para o que o nó já tem) é o que impede
+  o eco de virar laço.
+- Etapa 10 (o que a falha de um teste ensinou): a primeira versão contava como falha só
+  conexão recusada (timeout seria "peer lento, mas vivo") e o receptor **aguardava** o próprio
+  repasse. O teste do nó morto falhou: no Windows, conectar numa porta fechada não é recusado
+  na hora — o SYN é retransmitido e a chamada estoura os 2s de timeout. O nó morto parecia
+  "lento" e nunca saía da lista. A correção atacou a causa: o receptor responde ao remetente e
+  repassa **sem esperar** (`PeerClient.RelayBlock`). Assim nenhuma demora encadeada chega a
+  quem chamou, e qualquer "inacessível" — recusa, DNS ou timeout — pode contar como falha sem
+  tirar da lista um vizinho vivo por causa de um nó morto dois saltos adiante. Quem minera
+  continua aguardando o próprio push: os testes das etapas 6–7 seguem determinísticos; os de
+  dois saltos esperam o repasse (polling).
+- Etapa 10 (sementes x nós dinâmicos no compose): node1..node3 **não** ganharam
+  `ADVERTISE_URL` — continuam sementes, como nas etapas 5–9 (aceitam quem se anuncia, mas não
+  se anunciam). Isso preserva a demo da etapa 8: `docker compose stop/start node3` ainda traz o
+  nó de volta no genesis, recuperado pelo `POST /sync` manual. Os nós extras vêm do molde
+  `node-extra` (profile `extra`, ignorado pelo `docker compose up`) via
+  `scripts/add-node.ps1`, que usa `docker compose run --name nodeN` — o container herda
+  imagem, rede e `NODE_DIFFICULTY` do compose e a label do projeto (logs no Loki sem mudança).
+- Etapa 10 (observabilidade): o Prometheus trocou os alvos fixos por `docker_sd_configs` (mesmo
+  filtro por label do Alloy; `instance` reescrito para `nodeN:8080`), o que exigiu montar o
+  socket do Docker e rodar como `root`. Novas métricas: `satus.peers.count` (gauge) e
+  `satus.peer.membership{change=added|removed|evicted}`, com dois painéis novos no dashboard.
+- Etapa 10 (refatoração necessária): a lógica do `POST /sync` saiu do handler para o
+  `ChainSynchronizer`, porque ganhou um segundo chamador (a entrada na rede). O JSON do
+  endpoint não mudou.
+- Etapa 10 (validação): 157 testes (eram 112) — unidade para `PeerRegistry`, `PeerClient`
+  (remoção por falha, anúncio, despedida), `MembershipService` (anúncio em largura, descarte de
+  peer incompatível, despedida no `StopAsync`) e `NodeOptions` (`ADVERTISE_URL`); integração
+  para entrada, descoberta pela semente, sync na entrada, handshake (409/502/400), despedida
+  via `DELETE /peers`, queda e repasse em dois saltos e em ciclo. A despedida do desligamento
+  gracioso é coberta por unidade: o teste de integração mata o processo (queda), e não há como
+  mandar um SIGTERM de verdade a um processo filho no Windows. **Pendente:** teste manual com
+  Docker (`add-node`/`remove-node`, `docker stop` disparando a despedida, alvos dinâmicos no
+  Prometheus) e aprovação.
+
 ## Cenário de demonstração final (referência para as etapas)
 
 1. `docker compose up` com 3 nós;
@@ -193,7 +255,13 @@ Legenda de status: ✅ concluída · 🚧 em andamento · ⬜ pendente
 3. validar a cadeia em todos os nós;
 4. derrubar o node3, minerar mais blocos nos demais;
 5. religar o node3 e sincronizá-lo (`POST /sync`, etapa 8);
-6. provocar um fork (isolar node3, minerar em ambos os lados);
-7. religar e observar a convergência pela longest chain rule;
-8. (opcional, etapa 9) subir a stack de observabilidade e repetir 2–7 vendo as métricas
-   mudarem no Grafana e o trace de cada mineração atravessando os três nós no Jaeger.
+6. acrescentar um nó com o sistema rodando (`scripts/add-node.ps1 node4 -HostPort 8083`):
+   ele entra pela semente, aparece no `GET /peers` de todos e já nasce com a cadeia
+   sincronizada; minerar no node4 e ver o bloco nos outros (etapa 10);
+7. tirar o node4 avisando (`remove-node.ps1 node4`) e sem avisar (`-Crash`): na despedida ele
+   some das listas na hora; na queda, após 3 chamadas sem resposta (etapa 10);
+8. provocar um fork (isolar node3, minerar em ambos os lados);
+9. religar e observar a convergência pela longest chain rule;
+10. (opcional, etapa 9) subir a stack de observabilidade e repetir 2–9 vendo as métricas
+    mudarem no Grafana (inclusive o número de peers de cada nó) e o trace de cada mineração
+    atravessando os nós no Jaeger.

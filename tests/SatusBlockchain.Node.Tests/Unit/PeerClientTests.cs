@@ -23,7 +23,7 @@ public class PeerClientTests
     {
         var handler = new StubHandler(_ => throw new InvalidOperationException("não deveria enviar"));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options(), NullLogger<PeerClient>.Instance, Telemetry());
+        var client = new PeerClient(http, Peers(), NullLogger<PeerClient>.Instance, Telemetry());
 
         var results = await client.BroadcastBlockAsync(Block());
 
@@ -37,7 +37,7 @@ public class PeerClientTests
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
         using var http = new HttpClient(handler);
         var client = new PeerClient(http,
-            Options("http://node2:8080", "http://node3:8080"), NullLogger<PeerClient>.Instance, Telemetry());
+            Peers("http://node2:8080", "http://node3:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var results = await client.BroadcastBlockAsync(Block());
 
@@ -62,7 +62,7 @@ public class PeerClientTests
         // e não pode virar exceção na mineração local.
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Conflict));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance, Telemetry());
+        var client = new PeerClient(http, Peers("http://node2:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var result = Assert.Single(await client.BroadcastBlockAsync(Block()));
 
@@ -80,7 +80,7 @@ public class PeerClientTests
 
         using var http = new HttpClient(handler);
         var client = new PeerClient(http,
-            Options("http://node2:8080", "http://node3:8080"), NullLogger<PeerClient>.Instance, Telemetry());
+            Peers("http://node2:8080", "http://node3:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var results = await client.BroadcastBlockAsync(Block());
 
@@ -98,7 +98,7 @@ public class PeerClientTests
     {
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options("http://node2:8080", "http://node3:8080"),
+        var client = new PeerClient(http, Peers("http://node2:8080", "http://node3:8080"),
             NullLogger<PeerClient>.Instance, Telemetry());
 
         var results = await client.BroadcastTransactionAsync(new Transaction("alice", "bob", 10m));
@@ -122,7 +122,7 @@ public class PeerClientTests
         // mempool local e o peer pode recebê-la depois (via bloco ou nova tentativa).
         var handler = new StubHandler(_ => throw new HttpRequestException("conexão recusada"));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance, Telemetry());
+        var client = new PeerClient(http, Peers("http://node2:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var result = Assert.Single(await client.BroadcastTransactionAsync(new Transaction("alice", "bob", 10m)));
 
@@ -137,7 +137,7 @@ public class PeerClientTests
         // serializa e que o Hasher usa no cálculo do hash.
         var handler = new StubHandler(_ => Json(JsonSerializer.Serialize(new[] { Block(), Block() }, WebJson)));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options("http://node2:8080", "http://node3:8080"),
+        var client = new PeerClient(http, Peers("http://node2:8080", "http://node3:8080"),
             NullLogger<PeerClient>.Instance, Telemetry());
 
         var chains = await client.GetChainsAsync();
@@ -161,7 +161,7 @@ public class PeerClientTests
                 : Json("[]"));
 
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options("http://node2:8080", "http://node3:8080"),
+        var client = new PeerClient(http, Peers("http://node2:8080", "http://node3:8080"),
             NullLogger<PeerClient>.Instance, Telemetry());
 
         var chains = await client.GetChainsAsync();
@@ -182,7 +182,7 @@ public class PeerClientTests
         // POST /sync ignorar este peer em vez de responder 500.
         var handler = new StubHandler(_ => Json("{\"nao\":\"e uma cadeia\"}"));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options("http://node2:8080"), NullLogger<PeerClient>.Instance, Telemetry());
+        var client = new PeerClient(http, Peers("http://node2:8080"), NullLogger<PeerClient>.Instance, Telemetry());
 
         var result = Assert.Single(await client.GetChainsAsync());
 
@@ -195,7 +195,7 @@ public class PeerClientTests
     {
         var handler = new StubHandler(_ => throw new InvalidOperationException("não deveria chamar"));
         using var http = new HttpClient(handler);
-        var client = new PeerClient(http, Options(), NullLogger<PeerClient>.Instance, Telemetry());
+        var client = new PeerClient(http, Peers(), NullLogger<PeerClient>.Instance, Telemetry());
 
         var chains = await client.GetChainsAsync();
 
@@ -213,7 +213,7 @@ public class PeerClientTests
         using var http = new HttpClient(handler);
         var telemetry = Telemetry();
         using var spy = new MetricSpy(telemetry);
-        var client = new PeerClient(http, Options("http://node2:8080"),
+        var client = new PeerClient(http, Peers("http://node2:8080"),
             NullLogger<PeerClient>.Instance, telemetry);
 
         await client.BroadcastBlockAsync(Block());
@@ -222,14 +222,142 @@ public class PeerClientTests
             ("kind", "block"), ("outcome", "refused")));
     }
 
+    [Theory]
+    [InlineData(false)] // conexão recusada / DNS
+    [InlineData(true)]  // timeout — é como um nó morto aparece em muitas redes (e no Windows)
+    public async Task Broadcast_SemRespostaTresVezes_TiraOPeerDaLista(bool timeout)
+    {
+        // Etapa 10 — detecção de falha: um peer que ENTROU em execução (não é semente) e não
+        // responde três vezes seguidas foi embora sem se despedir: sai da lista.
+        var handler = new StubHandler(_ =>
+        {
+            if (timeout)
+                throw new TaskCanceledException("timeout");
+            throw new HttpRequestException("conexão recusada");
+        });
+        using var http = new HttpClient(handler);
+        var registry = Peers();
+        registry.Add("http://node4:8080");
+        var telemetry = Telemetry();
+        using var spy = new MetricSpy(telemetry);
+        var client = new PeerClient(http, registry, NullLogger<PeerClient>.Instance, telemetry);
+
+        await client.BroadcastBlockAsync(Block());
+        await client.BroadcastBlockAsync(Block());
+        Assert.True(registry.Contains("http://node4:8080")); // duas falhas ainda não bastam
+
+        await client.BroadcastBlockAsync(Block());
+
+        Assert.False(registry.Contains("http://node4:8080"));
+        Assert.Equal(1, spy.TotalWithTags("satus.peer.membership", ("change", "evicted")));
+
+        // Fora da lista, o peer não é mais procurado: o próximo push nem tenta.
+        await client.BroadcastBlockAsync(Block());
+        Assert.Equal(3, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Broadcast_SementeNuncaSaiDaListaPorFalha()
+    {
+        // Sementes (PEERS) são configuração do operador e o caminho de volta depois de uma
+        // queda ou partição: falham, aparecem como "inacessível", mas continuam na lista.
+        var handler = new StubHandler(_ => throw new HttpRequestException("conexão recusada"));
+        using var http = new HttpClient(handler);
+        var registry = Peers("http://node2:8080");
+        var client = new PeerClient(http, registry, NullLogger<PeerClient>.Instance, Telemetry());
+
+        for (var i = 0; i < PeerRegistry.MaxConsecutiveFailures + 2; i++)
+            await client.BroadcastBlockAsync(Block());
+
+        Assert.True(registry.Contains("http://node2:8080"));
+    }
+
+    [Fact]
+    public async Task Broadcast_UmaRespostaNoMeio_ZeraAContagem()
+    {
+        // "Seguidas" é a palavra-chave: qualquer resposta (até um 409) prova que está vivo.
+        var calls = 0;
+        var handler = new StubHandler(_ => ++calls == 3
+            ? new HttpResponseMessage(HttpStatusCode.Conflict)
+            : throw new HttpRequestException("conexão recusada"));
+        using var http = new HttpClient(handler);
+        var registry = Peers();
+        registry.Add("http://node4:8080");
+        var client = new PeerClient(http, registry, NullLogger<PeerClient>.Instance, Telemetry());
+
+        // falha, falha, RESPOSTA, falha, falha → nunca chegou a três seguidas.
+        for (var i = 0; i < 5; i++)
+            await client.BroadcastBlockAsync(Block());
+
+        Assert.True(registry.Contains("http://node4:8080"));
+    }
+
+    [Fact]
+    public async Task Announce_Aceito_DevolveGenesisEPeersDoOutroNo()
+    {
+        // O anúncio (etapa 10) vai no corpo de POST /peers; a resposta é a "carta de
+        // boas-vindas", com a qual o nó novo descobre o resto da rede.
+        var welcome = new PeerWelcome(true, "node1", "hash-do-genesis", ["http://node2:8080"]);
+        var handler = new StubHandler(_ => Json(JsonSerializer.Serialize(welcome, WebJson)));
+        using var http = new HttpClient(handler);
+        var client = new PeerClient(http, Peers(), NullLogger<PeerClient>.Instance, Telemetry());
+
+        var reply = await client.AnnounceAsync("http://node1:8080", "http://node4:8080");
+
+        Assert.NotNull(reply.Value);
+        Assert.Equal("hash-do-genesis", reply.Value!.Genesis);
+        Assert.Equal(["http://node2:8080"], reply.Value.Peers);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("POST", request.Method);
+        Assert.Equal("http://node1:8080/peers", request.Url);
+        Assert.Equal("http://node4:8080",
+            JsonSerializer.Deserialize<PeerAnnouncement>(request.Body, WebJson)!.Url);
+    }
+
+    [Fact]
+    public async Task Announce_Recusado_ViraResultadoComOStatus()
+    {
+        // 409 = o peer achou este nó incompatível: vira resultado, quem decide o que fazer
+        // (tirar o peer da lista) é o MembershipService.
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Conflict));
+        using var http = new HttpClient(handler);
+        var client = new PeerClient(http, Peers(), NullLogger<PeerClient>.Instance, Telemetry());
+
+        var reply = await client.AnnounceAsync("http://node1:8080", "http://node4:8080");
+
+        Assert.Null(reply.Value);
+        Assert.Equal("409", reply.Detail);
+    }
+
+    [Fact]
+    public async Task BroadcastLeave_EnviaDeleteComOProprioEnderecoATodosOsPeers()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        using var http = new HttpClient(handler);
+        var client = new PeerClient(http, Peers("http://node1:8080", "http://node2:8080"),
+            NullLogger<PeerClient>.Instance, Telemetry());
+
+        var results = await client.BroadcastLeaveAsync("http://node4:8080");
+
+        Assert.Equal(2, results.Count);
+        Assert.All(results, result => Assert.True(result.Accepted));
+        Assert.All(handler.Requests, request =>
+        {
+            Assert.Equal("DELETE", request.Method);
+            Assert.EndsWith("/peers?url=http://node4:8080", Uri.UnescapeDataString(request.Url));
+        });
+    }
+
     /// <summary>
     /// Telemetria real para o construtor do <see cref="PeerClient"/> (etapa 9): instância
     /// barata (genesis na dificuldade 2), sem exportador — os testes leem os contadores
     /// com um <c>MeterListener</c> quando o desfecho é o que está sob teste.
     /// </summary>
-    private static NodeTelemetry Telemetry() => new(new Blockchain(2), new Mempool());
+    private static NodeTelemetry Telemetry() => new(new Blockchain(2), new Mempool(), Peers());
 
-    private static NodeOptions Options(params string[] peers) => new("node-test", 2, peers);
+    /// <summary>Registro com as sementes informadas — como o PEERS de um nó (etapa 10).</summary>
+    private static PeerRegistry Peers(params string[] peers) => new(new NodeOptions("node-test", 2, peers));
 
     /// <summary>Resposta 200 com corpo JSON (o media type não importa: o PeerClient
     /// desserializa o corpo, não negocia content-type).</summary>
@@ -254,7 +382,7 @@ public class PeerClientTests
     /// </summary>
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
-        public List<(string Url, string Body)> Requests { get; } = [];
+        public List<(string Url, string Body, string Method)> Requests { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
@@ -264,7 +392,7 @@ public class PeerClientTests
                 : await request.Content.ReadAsStringAsync(cancellationToken);
 
             lock (Requests)
-                Requests.Add((request.RequestUri!.ToString(), body));
+                Requests.Add((request.RequestUri!.ToString(), body, request.Method.Method));
 
             return respond(request);
         }

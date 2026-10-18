@@ -41,10 +41,12 @@ public static class TransactionEndpoints
             return Results.Created("/transactions/pending", transaction);
         });
 
-        // Recebe uma transação propagada por outro nó (gossip de 1 hop: o receptor NÃO
-        // re-propaga — com as listas de PEERS completas, um hop alcança todos os nós).
+        // Recebe uma transação propagada por outro nó. Até a etapa 9 o gossip era de 1 hop
+        // (com listas de PEERS completas, um hop alcançava todos). Com nós entrando e saindo
+        // (etapa 10) as listas podem estar incompletas, então quem ACEITA re-propaga — e o
+        // dedup abaixo (409 para repetida) é o que impede o eco de virar laço.
         group.MapPost("/receive", (Transaction transaction, Mempool mempool, Blockchain blockchain,
-            NodeTelemetry telemetry, ILoggerFactory loggerFactory) =>
+            PeerClient peerClient, NodeTelemetry telemetry, ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("Transactions");
 
@@ -85,6 +87,9 @@ public static class TransactionEndpoints
             var pending = mempool.GetPending().Count;
             logger.LogInformation("Transação {From}->{To} recebida de um peer. Mempool com {Count} pendentes.",
                 transaction.From, transaction.To, pending);
+
+            // Re-propagação (etapa 10), sem esperar — mesmo raciocínio do bloco em /blocks/receive.
+            peerClient.RelayTransaction(transaction);
 
             return Results.Ok(new { accepted = true, pending });
         });

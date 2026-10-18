@@ -8,6 +8,7 @@ namespace SatusBlockchain.Node.Api;
 /// <summary>
 /// Endpoints de mineração e de recebimento de blocos (etapa 6: minar PROPAGA, receber
 /// ACEITA ou RECUSA — as regras de aceitação ficam no domínio, em Blockchain.AddBlock).
+/// Desde a etapa 10, receber e aceitar também RE-PROPAGA (multi-hop).
 /// </summary>
 public static class BlockEndpoints
 {
@@ -60,7 +61,7 @@ public static class BlockEndpoints
         // Recebe um bloco propagado por outro nó. O corpo é o bloco CRU — o mesmo shape
         // de um item de GET /chain, o que permite copiar um bloco de um nó e postar no outro.
         group.MapPost("/receive", (Block block, Blockchain blockchain, Mempool mempool,
-            NodeTelemetry telemetry, ILoggerFactory loggerFactory) =>
+            PeerClient peerClient, NodeTelemetry telemetry, ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("Blocks");
 
@@ -91,9 +92,17 @@ public static class BlockEndpoints
             Activity.Current?.SetTag("satus.block.outcome", "accepted");
             telemetry.BlockReceived(accepted: true);
 
+            var length = blockchain.Length;
             logger.LogInformation("Bloco {Index} recebido de um peer. Cadeia com {Length} blocos.",
-                block.Index, blockchain.Length);
-            return Results.Ok(new { accepted = true, index = block.Index, length = blockchain.Length });
+                block.Index, length);
+
+            // Re-propagação (etapa 10): com nós entrando e saindo, nem todo nó conhece todos —
+            // o bloco segue adiante a partir de quem o ACEITOU. Não vira laço: quem já tem o
+            // bloco responde 409 e não repassa. Sem esperar: o remetente recebe o 200 já, e
+            // um peer lento DESTE nó não vira lentidão (nem falha) na conta do remetente.
+            peerClient.RelayBlock(block);
+
+            return Results.Ok(new { accepted = true, index = block.Index, length });
         });
     }
 }

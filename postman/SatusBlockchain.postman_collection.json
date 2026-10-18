@@ -53,7 +53,8 @@
               "const no = pm.response.json();",
               "pm.test('identifica o no (NODE_ID)', () => pm.expect(no.node).to.be.a('string'));",
               "pm.test('existe pelo menos o genesis', () => pm.expect(no.blocks).to.be.at.least(1));",
-              "pm.test('cadeia valida', () => pm.expect(no.valid).to.be.true);"
+              "pm.test('cadeia valida', () => pm.expect(no.valid).to.be.true);",
+              "pm.test('informa o hash do genesis (identidade da rede, etapa 10)', () => pm.expect(no.genesis).to.have.lengthOf(64));"
             ]
           }
         }
@@ -66,7 +67,7 @@
           "host": ["{{node1Url}}"],
           "path": [""]
         },
-        "description": "GET / — identidade do no, dificuldade, tamanho e validade da cadeia. E o request de 'o no esta de pe?'."
+        "description": "GET / — identidade do no, dificuldade, hash do genesis, tamanho e validade da cadeia. E o request de 'o no esta de pe?' — e, desde a etapa 10, o que o handshake de POST /peers le para conferir se um no novo nasceu do mesmo genesis."
       }
     },
     {
@@ -407,7 +408,7 @@
     },
 
     {
-      "name": "11. Peers configurados (etapa 6)",
+      "name": "11. Peers do no (etapas 6 e 10)",
       "event": [
         {
           "listen": "test",
@@ -434,7 +435,7 @@
           "host": ["{{node1Url}}"],
           "path": ["peers"]
         },
-        "description": "GET /peers — os peers configurados por PEERS: e para esses enderecos que o POST /blocks/mine faz push do bloco novo (POST /blocks/receive). Com os 3 containers, o node1 responde http://node2:8080 e http://node3:8080; sem PEERS a lista vem vazia."
+        "description": "GET /peers — a lista ATUAL de peers do no: e para esses enderecos que o POST /blocks/mine faz push do bloco novo (POST /blocks/receive). Ela nasce de PEERS e, desde a etapa 10, muda em execucao: entra quem se anuncia (POST /peers), sai quem se despede (DELETE /peers) ou para de responder. Com os 3 containers, o node1 responde http://node2:8080 e http://node3:8080 — mais os nos criados pelo scripts/add-node.ps1; sem PEERS a lista comeca vazia. O campo url e o ADVERTISE_URL do no (null nos nos base)."
       }
     },
 
@@ -614,7 +615,7 @@
               "",
               "const r = pm.response.json();",
               "const alvos = r.data.activeTargets;",
-              "pm.test('ao menos 4 alvos ativos: 3 nos + autoscraping do Prometheus', () => {",
+              "pm.test('ao menos 4 alvos ativos: 3 nos (+ extras) + autoscraping do Prometheus', () => {",
               "    pm.expect(alvos.length).to.be.at.least(4);",
               "});",
               "pm.test('todos com health=up (scrape sem falha)', () => {",
@@ -639,7 +640,7 @@
             }
           ]
         },
-        "description": "GET /api/v1/targets (Prometheus) — saude de todos os alvos de scrape: 3 nos + o proprio Prometheus. health=up = raspagem do /metrics funcionando; se um no cair, aparece health=down aqui (e na UI http://localhost:9090/targets)."
+        "description": "GET /api/v1/targets (Prometheus) — saude de todos os alvos de scrape: os nos + o proprio Prometheus. Desde a etapa 10 os alvos sao DESCOBERTOS pelo Docker (docker_sd_configs): um node4 criado pelo scripts/add-node.ps1 aparece aqui sozinho em ate 5s, e some quando o container e removido. health=up = raspagem do /metrics funcionando; se um no cair, aparece health=down aqui (e na UI http://localhost:9090/targets)."
       }
     },
     {
@@ -806,7 +807,7 @@
               "if (r.data.result.length > 0) {",
               "    const stream = r.data.result[0];",
               "    pm.test('stream identifica o container', () => {",
-              "        pm.expect(stream.stream.container).to.match(/^node[123]$/);",
+              "        pm.expect(stream.stream.container).to.match(/^node\\d+$/);",
               "    });",
               "    const temMineracao = r.data.result.some(s => s.values.some(v => v[1].includes('minerado')));",
               "    if (temMineracao) {",
@@ -872,6 +873,113 @@
           "path": ["api", "health"]
         },
         "description": "GET /api/health (Grafana) — Grafana no ar e, via chamada aninhada, as 2 datasources provisionadas (Prometheus + Loki) sem clique manual. Dashboards: http://localhost:3000/d/satus-nos (painel dos 3 nos) e Explore para logs. Acesso anonimo em modo leitura; admin/admin para editar."
+      }
+    },
+    {
+      "name": "22. Despedida de um peer (DELETE /peers)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK (idempotente: 200 mesmo se o peer ja nao estava na lista)', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('informa se removeu', () => pm.expect(r.removed).to.be.a('boolean'));",
+              "pm.test('o peer nao esta mais na lista', () => pm.expect(r.peers).to.not.include('http://node3:8080'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{node1Url}}/peers?url=http://node3:8080",
+          "host": ["{{node1Url}}"],
+          "path": ["peers"],
+          "query": [
+            {
+              "key": "url",
+              "value": "http://node3:8080"
+            }
+          ]
+        },
+        "description": "DELETE /peers?url=... (etapa 10) — o que um no manda ao ser desligado com docker stop: 'estou saindo, me tire da lista'. Aqui o node1 tira o node3 da lista DELE (so dele: cada no tem a sua). A partir dai o push do node1 nao vai mais ao node3 — rode o request 24 para recoloca-lo."
+      }
+    },
+    {
+      "name": "23. Peers depois da despedida",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('node3 saiu da lista do node1', () => pm.expect(r.peers).to.not.include('http://node3:8080'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{node1Url}}/peers",
+          "host": ["{{node1Url}}"],
+          "path": ["peers"]
+        },
+        "description": "GET /peers — a lista do node1 sem o node3: a lista de peers e ESTADO do no e mudou com o sistema rodando. Compare com GET /peers do node2 ({{node2Url}}/peers): la o node3 continua — a visao da rede e local a cada no, sem consenso (como a mempool)."
+      }
+    },
+    {
+      "name": "24. Anunciar um no (POST /peers)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK (handshake aprovado: respondeu em GET / e tem o mesmo genesis)', () => pm.response.to.have.status(200));",
+              "",
+              "const r = pm.response.json();",
+              "pm.test('boas-vindas: quem respondeu e o genesis dele', () => {",
+              "    pm.expect(r.node).to.be.a('string');",
+              "    pm.expect(r.genesis).to.have.lengthOf(64);",
+              "});",
+              "pm.test('boas-vindas: os peers que ele conhece (e como o no novo descobre a rede)', () => pm.expect(r.peers).to.be.an('array'));",
+              "pm.test('added informa se entrou agora (false = reanuncio)', () => pm.expect(r.added).to.be.a('boolean'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"http://node3:8080\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{node1Url}}/peers",
+          "host": ["{{node1Url}}"],
+          "path": ["peers"]
+        },
+        "description": "POST /peers (etapa 10) — o que um no novo manda ao subir: 'existo, me chame em {url}'. Antes de registrar, o node1 faz o HANDSHAKE: chama GET / no endereco anunciado e confere o genesis. 200 = entrou (ou ja estava: added=false); 409 = genesis/dificuldade diferente ou NODE_ID repetido; 502 = o endereco nao respondeu (troque a url por http://node9:8080 para ver); 400 = url invalida. Recoloca o node3 tirado no request 22."
       }
     }
   ]

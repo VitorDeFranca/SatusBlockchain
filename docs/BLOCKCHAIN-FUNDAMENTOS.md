@@ -242,6 +242,25 @@ Um nó que religa não recebeu os blocos propagados enquanto estava fora. Ele ch
 rule. Como a cadeia dos colegas é mais longa e válida, ele a adota inteira — e volta
 a estar em sincronia. Esse é o mecanismo de **recuperação após falha**.
 
+### 6.5 E um nó novo? → Membership dinâmica (entrar e sair da rede)
+
+Numa rede real ninguém tem a lista completa de nós escrita num arquivo: nós entram e
+saem o tempo todo. Cada nó mantém a **sua** lista de peers (como a mempool, é estado
+local) e ela muda durante a execução:
+
+- **Entrar:** o nó novo conhece só uma **semente** (*seed* — no Bitcoin, endereços
+  embutidos no software). Ele se anuncia a ela; a semente confere se o recém-chegado é
+  da mesma rede (mesmo **genesis**) e responde com os peers que conhece. O nó novo se
+  anuncia a cada um e, como nasceu só com o genesis, **sincroniza** a cadeia (6.4).
+- **Sair avisando:** ao ser desligado, o nó se despede e os outros o tiram da lista.
+- **Cair sem avisar:** ninguém recebe despedida — os outros percebem pelas **falhas**:
+  depois de algumas chamadas seguidas sem resposta, o nó sai da lista (**detecção de
+  falha**).
+
+Com listas que mudam, nem todo nó conhece todos. Por isso quem **aceita** um bloco o
+repassa adiante (**re-propagação**): o bloco chega a quem não está na lista de quem o
+minerou. Não vira laço porque quem já tem o bloco não o aceita de novo — e não repassa.
+
 ---
 
 ## 7. O que este projeto omite (de propósito)
@@ -253,7 +272,7 @@ distribuídos. O SatusBlockchain omite deliberadamente:
 |---------|-------------|----------------------|
 | Assinaturas digitais | Provar que "Alice" autorizou a transação (chaves pública/privada) | Criptografia de identidade, não de distribuição |
 | Saldos e double-spending | Impedir gastar duas vezes o mesmo valor | Exigiria rastrear estado de contas entre nós |
-| Descoberta de peers | Nós encontrarem uns aos outros dinamicamente | Peers estáticos (3 nós) demonstram o mesmo conceito |
+| Descoberta automática de sementes | Achar o primeiro nó sozinho (DNS seeds do Bitcoin) | A semente vem de `PEERS`; dali em diante a descoberta é dinâmica (seção 6.5) |
 | Persistência | Sobreviver a reinicialização | Perder tudo ao reiniciar *ajuda* a demo de recuperação |
 | Recompensa de mineração | Incentivo econômico (moeda nova por bloco) | Economia, não sistemas distribuídos |
 
@@ -275,8 +294,9 @@ distribuídos. O SatusBlockchain omite deliberadamente:
 | Gossip de transações (mempool local) | `Networking/PeerClient.cs`, `POST /transactions/receive` | 7 |
 | Consenso (longest chain) e reorg | `Blockchain.TryReplaceChain()`, `POST /sync` | 8 |
 | Observabilidade (logs, métricas, traces) | `Observability/NodeTelemetry.cs`, `GET /metrics`, stack do overlay | 9 |
-| Fork e convergência | roteiro de demonstração | 10 |
-| Consistência eventual e recuperação | demos das etapas 8–10 | 8–10 |
+| Membership dinâmica (entrar, sair, detecção de falha) | `Networking/PeerRegistry.cs`, `Networking/MembershipService.cs`, `POST`/`DELETE /peers`, `scripts/` | 10 |
+| Fork e convergência | roteiro de demonstração | 11 |
+| Consistência eventual e recuperação | demos das etapas 8–11 | 8–11 |
 
 ---
 
@@ -287,6 +307,8 @@ distribuídos. O SatusBlockchain omite deliberadamente:
 - **Minerar** — resolver o Proof of Work e propor um novo bloco.
 - **Mempool** — fila de transações pendentes, aguardando entrar em um bloco.
 - **Peer** — outro nó da rede com quem um nó se comunica.
+- **Semente (seed)** — nó já conhecido pelo qual um nó novo entra na rede.
+- **Membership** — quem faz parte da rede segundo cada nó; muda com entradas, saídas e falhas.
 - **Fork** — divisão temporária da cadeia em duas versões concorrentes.
 - **Reorg** — substituição da cadeia local por uma cadeia mais longa recebida.
 - **Consistência eventual** — garantia de que os nós convergem, não de que estão

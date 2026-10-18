@@ -43,7 +43,7 @@ O collection já tem as variáveis:
 
 | # | Request | O que observar |
 |---|---------|----------------|
-| 1 | `GET /` | nó de pé: `node`, `difficulty`, `blocks = 1`, `valid = true` |
+| 1 | `GET /` | nó de pé: `node`, `difficulty`, `genesis`, `blocks = 1`, `valid = true` |
 | 2 | `GET /chain` | só o genesis: `index 0`, `previousHash "0"`, `hash` já com N zeros |
 | 3 | `GET /chain/validate` | `valid: true`, `length: 1` |
 | 4 | `POST /transactions` | **201 Created** + `Location: /transactions/pending` |
@@ -53,7 +53,7 @@ O collection já tem as variáveis:
 | 8 | `GET /transactions/pending` | **vazio** — as transações entraram no bloco |
 | 9 | `POST /transactions` (inválida) | **400 Bad Request** (`from` vazio, `amount <= 0`, etc.) |
 | 10 | `GET /chain` | cadeia com 2 blocos: cada `previousHash` igual ao `hash` do anterior |
-| 11 | `GET /peers` | peers configurados (`PEERS`) — vazio no `dotnet run` sem `PEERS`; com Docker, `http://node2:8080` e `http://node3:8080` |
+| 11 | `GET /peers` | a lista **atual** de peers — nasce de `PEERS` (vazia no `dotnet run` sem `PEERS`; com Docker, `http://node2:8080` e `http://node3:8080`) e muda em execução (etapa 10, seção 4.4) |
 | 12 | `POST /transactions/receive` | entrega a transação como um **peer** faria (gossip): **200** entra na mempool; rodando de novo, **409** (dedup) |
 | 13 | `POST /sync` | **pull**: o nó pergunta a cadeia dos peers e adota a válida mais longa (request 4.1) |
 | 14 | `GET /metrics` | métricas do nó em formato **Prometheus**: gauge `satus_chain_length` com o tamanho atual; após o request 7, o counter `satus_blocks_mined_total` |
@@ -156,6 +156,40 @@ Detalhes que valem a pena saber antes de rodar:
   funciona colado no **Explore** do Grafana (datasource Loki), que é a forma visual de
   investigar.
 
+### 4.4 Nós entrando e saindo (etapa 10, requests 22–24)
+
+A lista de peers deixou de ser fixa: cada nó tem a **sua**, e ela muda com o sistema no ar.
+Os requests 22–24 mostram o mecanismo sem precisar de nó novo, e voltam ao estado inicial:
+
+| # | Request | O que observar |
+|---|---------|----------------|
+| 22 | `DELETE /peers?url=http://node3:8080` | o node1 tira o node3 da lista **dele** (é o que um nó manda ao ser desligado com `docker stop`) |
+| 23 | `GET /peers` | node3 fora da lista do node1 — mas troque para `{{node2Url}}`: lá ele continua (a visão da rede é local a cada nó) |
+| 24 | `POST /peers` `{"url":"http://node3:8080"}` | o node3 volta: o node1 faz o **handshake** (chama `GET /` no node3 e confere o `genesis`) e responde com as boas-vindas (`node`, `genesis`, `peers`) |
+
+Para ver um nó **de verdade** entrando e saindo, com os containers no ar:
+
+```powershell
+.\scripts\add-node.ps1 node4 -HostPort 8083   # cria o node4 a partir do molde node-extra
+docker logs node4                             # "Anúncio como http://node4:8080: 3 peers aceitaram"
+```
+
+Depois: request 11 (`GET /peers`) em qualquer nó já lista `http://node4:8080`; troque
+`baseUrl` para `http://localhost:8083` e rode o request 2 (`GET /chain`): o node4 nasceu com a
+mesma cadeia (sincronizou ao entrar). O request 7 no node4 minera e o bloco chega aos outros.
+
+Para tirá-lo:
+
+- `.\scripts\remove-node.ps1 node4` → **despedida** (`docker stop`): sai das listas na hora;
+- `.\scripts\remove-node.ps1 node4 -Crash` → **queda** (`docker kill`): ninguém é avisado. Rode
+  o request 7 (minerar) três vezes no node1 — cada push sem resposta conta uma falha — e o
+  request 11 mostra o node4 fora da lista. (Repetir o request 4 não serve: a mesma transação
+  cai no dedup da mempool e nem é propagada.)
+
+Com a stack de observabilidade no ar, o request 16 mostra o `node4:8080` entre os alvos do
+Prometheus (descoberto pelo Docker em até 5s), e o dashboard do Grafana mostra o número de
+peers de cada nó subindo e descendo.
+
 ## 5. Rodar tudo de uma vez (Collection Runner)
 
 No collection, clique em **Run** → **Run SatusBlockchain**. O Postman executa
@@ -203,4 +237,7 @@ Invoke-RestMethod "$base/blocks/mine" -Method Post | Format-List
 | Teste do PoW falhando | variável `difficulty` do collection diferente do `DIFFICULTY` do nó |
 | `POST /blocks/receive` retorna **409** | o bloco não estende a cadeia local: duplicado (já está na cadeia), órfão (índice fora de sequência — nó que ficou para trás) ou adulterado (hash/PoW não conferem) |
 | Bloco minerado não aparece no outro nó | o nó não tem o peer em `PEERS` (veja `GET /peers`), os nós estão com **dificuldades diferentes**, ou o outro nó reiniciou e voltou ao genesis — nesse caso ele recusa tudo com 409 até o `POST /sync` da etapa 8 |
-| `POST /transactions/receive` retorna **409** | a transação já está pendente na mempool local (dedup) ou já está **confirmada** em um bloco — nenhum dos dois é erro: é o gossip chegando duas vezes |
+| `POST /transactions/receive` retorna **409** | a transação já está pendente na mempool local (dedup) ou já está **confirmada** em um bloco — nenhum dos dois é erro: é o gossip chegando duas vezes (e, desde a etapa 10, o repasse de outro peer) |
+| `POST /peers` retorna **502** | o handshake não alcançou a `url` anunciada: o nó não existe, não subiu, ou o endereço só vale do host (`localhost`) — entre os containers, use `http://nodeN:8080` |
+| `POST /peers` retorna **409** | o nó anunciado nasceu de outra dificuldade (genesis diferente) ou tem o mesmo `NODE_ID` de quem recebeu o anúncio |
+| `add-node.ps1` cria o nó, mas ele não aparece em `GET /peers` | veja `docker logs <nó>`: semente fora do ar (suba os nós base com `docker compose up -d`) ou `NODE_DIFFICULTY` diferente do usado pelos nós base |

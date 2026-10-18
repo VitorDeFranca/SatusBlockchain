@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SatusBlockchain.Node.Core;
+using SatusBlockchain.Node.Networking;
 using SatusBlockchain.Node.Observability;
 
 namespace SatusBlockchain.Node.Tests.Unit;
@@ -36,6 +37,7 @@ public class NodeTelemetryTests
         telemetry.PeerPush("block", accepted: false, unreachable: false);
         telemetry.PeerPush("transaction", accepted: false, unreachable: true);
         telemetry.PeerPull("unreachable");
+        telemetry.PeerMembership("evicted");
         telemetry.Sync("adopted");
         telemetry.TransactionReceived(fromPeer: true, accepted: false);
 
@@ -46,27 +48,31 @@ public class NodeTelemetryTests
         Assert.Equal(1, spy.TotalWithTags("satus.peer.push",
             ("kind", "transaction"), ("outcome", "unreachable")));
         Assert.Equal(1, spy.TotalWithTags("satus.peer.pull", ("outcome", "unreachable")));
+        Assert.Equal(1, spy.TotalWithTags("satus.peer.membership", ("change", "evicted")));
         Assert.Equal(1, spy.TotalWithTags("satus.sync", ("outcome", "adopted")));
         Assert.Equal(1, spy.TotalWithTags("satus.txs.received",
             ("source", "peer"), ("outcome", "rejected")));
     }
 
     [Fact]
-    public void Gauges_LenCadeiaEMempoolAtuais()
+    public void Gauges_LenCadeiaMempoolEPeersAtuais()
     {
         var blockchain = new Blockchain(2);
         var mempool = new Mempool();
-        var telemetry = new NodeTelemetry(blockchain, mempool);
+        var peers = new PeerRegistry(new NodeOptions("node-test", 2, ["http://node2:8080"]));
+        var telemetry = new NodeTelemetry(blockchain, mempool, peers);
         using var spy = new MetricSpy(telemetry);
 
         mempool.Add(new Transaction("alice", "bob", 10m));
         mempool.Add(new Transaction("bob", "carol", 5m));
+        peers.Add("http://node4:8080");
         spy.RecordObservables();
 
         // Diferente dos contadores, gauge não acumula: devolve o estado ATUAL
-        // (1 = só o genesis; 2 = as duas transações pendentes).
+        // (1 = só o genesis; 2 = as duas transações pendentes; 2 = semente + nó que entrou).
         Assert.Equal(1, spy.Latest("satus.chain.length"));
         Assert.Equal(2, spy.Latest("satus.mempool.size"));
+        Assert.Equal(2, spy.Latest("satus.peers.count"));
     }
 
     [Fact]
@@ -95,5 +101,6 @@ public class NodeTelemetryTests
     /// Instância barata: genesis na dificuldade 2 e sem exportador — suficiente para
     /// exercitar contadores/gauges sem I/O algum.
     /// </summary>
-    private static NodeTelemetry Telemetry() => new(new Blockchain(2), new Mempool());
+    private static NodeTelemetry Telemetry() =>
+        new(new Blockchain(2), new Mempool(), new PeerRegistry(new NodeOptions("node-test", 2, [])));
 }

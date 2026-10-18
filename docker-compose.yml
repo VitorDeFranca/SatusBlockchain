@@ -26,6 +26,12 @@
 #
 # Os três serviços são idênticos exceto por NODE_ID e pela porta publicada no
 # host: é a mesma imagem rodando 3 vezes, com estado em memória separado.
+#
+# Etapa 10 (nós em tempo de execução): node1..node3 são as SEMENTES — sobem com o
+# compose e aceitam quem se anuncia a eles. Nós novos entram e saem com o sistema no ar:
+#   .\scripts\add-node.ps1 node4 -HostPort 8083     # entra (molde node-extra, abaixo)
+#   .\scripts\remove-node.ps1 node4                 # sai se despedindo (docker stop)
+#   .\scripts\remove-node.ps1 node4 -Crash          # cai sem avisar (docker kill)
 
 name: satusblockchain
 
@@ -80,6 +86,24 @@ services:
     networks:
       - satus-net
     restart: unless-stopped
+
+  # Etapa 10: MOLDE dos nós que entram com o sistema rodando — não é um nó por si só.
+  # O profile "extra" impede que `docker compose up` o suba; cada nó novo é um container
+  # criado pelo scripts/add-node.ps1 com `docker compose run --name nodeN ... node-extra`,
+  # que acrescenta NODE_ID e ADVERTISE_URL próprios. Herdar daqui garante a mesma imagem,
+  # a mesma rede e — o mais importante — a MESMA dificuldade dos outros nós.
+  node-extra:
+    profiles: ["extra"]
+    build:
+      context: .
+      dockerfile: src/SatusBlockchain.Node/Dockerfile
+    image: satus-node:local
+    environment:
+      # A semente: basta UM nó conhecido — o resto da rede vem na resposta do anúncio.
+      PEERS: "http://node1:8080"
+      DIFFICULTY: "${NODE_DIFFICULTY:-4}"
+    networks:
+      - satus-net
 
 networks:
   satus-net:

@@ -21,6 +21,7 @@ execução local com Docker Compose.
 ```
 src/SatusBlockchain.Node/                  # nó da blockchain (ASP.NET Core)
 tests/SatusBlockchain.Node.Tests/          # testes: unidade (Unit/) e integração (Integration/)
+scripts/                                   # add-node.ps1 / remove-node.ps1 (nós entrando e saindo, etapa 10)
 ```
 
 ## Como executar (nó único)
@@ -33,10 +34,11 @@ dotnet test                                             # tudo: unidade + integr
 dotnet test --filter "FullyQualifiedName~Tests.Unit"         # só unidade  (~20s, sem rede)
 dotnet test --filter "FullyQualifiedName~Tests.Integration"  # só integração (~26s, sobe nós reais)
 
-# sobe o nó (NODE_ID, DIFFICULTY e PEERS são opcionais)
+# sobe o nó (NODE_ID, DIFFICULTY, PEERS e ADVERTISE_URL são opcionais)
 $env:NODE_ID = "node1"
 $env:DIFFICULTY = "4"      # zeros hexadecimais do PoW; padrão 4 (~1s por bloco)
-$env:PEERS = "http://localhost:5166,http://localhost:5167"   # opcional: outros nós (etapa 6)
+$env:PEERS = "http://localhost:5166,http://localhost:5167"   # opcional: sementes, os peers iniciais (etapa 6)
+$env:ADVERTISE_URL = "http://localhost:5165"                 # opcional: anuncia-se aos PEERS ao subir (etapa 10)
 dotnet run --project src/SatusBlockchain.Node
 ```
 
@@ -46,14 +48,17 @@ Um projeto de teste só, com **uma pasta por tipo** — `Unit/` e `Integration/`
 com seu namespace, o que permite rodar só um conjunto pelo filtro:
 
 - **Unidade** (`tests/SatusBlockchain.Node.Tests/Unit`): `Block`, `Hasher`, `ProofOfWork`,
-  `Blockchain`, `Mempool`, `NodeOptions`. Testam classes isoladas — sem rede, sem HTTP,
+  `Blockchain`, `Mempool`, `NodeOptions`, `PeerRegistry`, `PeerClient` e `MembershipService`
+  (com `HttpMessageHandler` de mentira) e a telemetria. Testam classes isoladas — sem rede,
   sem subir processo. Determinísticos e instantâneos.
 - **Integração** (`tests/SatusBlockchain.Node.Tests/Integration`): sobe o executável do nó em
   uma porta livre e conversa por HTTP — valida rotas, status codes, JSON, `NODE_ID`/`DIFFICULTY`
   do ambiente e o fluxo mempool → bloco. Na etapa 6, `PropagationTests` liga 2–3 nós por
   `PEERS` para cobrir o push (bloco propagado, duplicado, adulterado, órfão e peer offline) e,
   na etapa 7, `TransactionPropagationTests` cobre o gossip (transação que nasce em um nó e é
-  minerada em outro, dedup e transação já confirmada).
+  minerada em outro, dedup e transação já confirmada). Na etapa 10, `MembershipTests` sobe nós
+  que entram pela semente com `ADVERTISE_URL` (descoberta, sync na entrada, handshake,
+  despedida e queda), e os testes de propagação ganham o repasse em dois saltos.
   Um processo novo por teste (isolamento total).
 
 ### Uso da API
@@ -84,16 +89,18 @@ curl http://localhost:5165/chain/validate
 
 | Endpoint | Descrição |
 |----------|-----------|
-| `GET /` | Identidade, dificuldade, tamanho e validade da cadeia |
+| `GET /` | Identidade, dificuldade, `genesis`, tamanho e validade da cadeia |
 | `GET /chain` | Cadeia completa do nó |
 | `GET /chain/validate` | Valida encadeamento, hashes e Proof of Work |
 | `POST /transactions` | Adiciona transação à mempool **e propaga aos peers** (gossip) |
 | `GET /transactions/pending` | Transações aguardando mineração (**visão local** do nó) |
-| `POST /transactions/receive` | Recebe uma transação propagada (**200** aceita · **409** duplicada ou já confirmada) |
+| `POST /transactions/receive` | Recebe uma transação propagada (**200** aceita e repassa · **409** duplicada ou já confirmada) |
 | `POST /blocks/mine` | Minera um bloco com a mempool e propaga aos peers (push) |
-| `POST /blocks/receive` | Recebe um bloco propagado (**200** aceito · **409** se não estende a cadeia) |
-| `GET /peers` | Peers configurados (`PEERS`) — o destino do push |
-| `POST /sync` | Puxa a cadeia dos peers e adota a **válida mais longa** (órfãs voltam à mempool) |
+| `POST /blocks/receive` | Recebe um bloco propagado (**200** aceito e repassa · **409** se não estende a cadeia) |
+| `GET /peers` | A lista **atual** de peers — nasce de `PEERS` e muda em execução (etapa 10) |
+| `POST /peers` | Um nó se anuncia `{"url": ...}`: handshake (**200** boas-vindas · **409** genesis/`NODE_ID` incompatível · **502** endereço não responde · **400** URL inválida) |
+| `DELETE /peers?url=...` | Um nó se despede e sai da lista (**200**, idempotente) |
+| `POST /sync` | Puxa a cadeia dos peers e adota a **válida mais longa** (órfãs voltam à mempool); com `ADVERTISE_URL`, reanuncia o nó antes |
 | `GET /metrics` | Métricas do nó no formato **Prometheus** (etapa 9): `satus_chain_length`, contadores `satus_*_total`, duração HTTP |
 
 ## Como executar (3 nós com Docker)
@@ -139,7 +146,45 @@ docker compose up -d --force-recreate      # mineração instantânea
 > Os **três** nós precisam da mesma dificuldade: o genesis é minerado na dificuldade do
 > nó, então genesis(dif 2) ≠ genesis(dif 4) e um bloco minerado com 2 zeros não satisfaz o
 > PoW de quem exige 4 — o peer recusaria tudo (409). Por isso os serviços compartilham a
-> mesma `${NODE_DIFFICULTY:-4}`; confira em `GET /` (`difficulty`).
+> mesma `${NODE_DIFFICULTY:-4}`; confira em `GET /` (`difficulty` e `genesis`).
+
+## Nós entrando e saindo com o sistema rodando (etapa 10)
+
+Os três nós do compose são as **sementes**. Outros nós entram e saem sem reiniciar nem
+reconfigurar ninguém:
+
+```powershell
+docker compose up --build -d                    # sementes: node1, node2, node3
+
+.\scripts\add-node.ps1 node4 -HostPort 8083     # cria o node4 (molde node-extra do compose)
+docker logs -f node4                            # anúncio, descoberta e sync da entrada
+curl http://localhost:8080/peers                # o node1 já lista http://node4:8080
+curl http://localhost:8083/chain                # o node4 nasceu com a cadeia da rede
+
+curl -X POST http://localhost:8083/blocks/mine  # minerado no node4 → chega aos outros
+
+.\scripts\remove-node.ps1 node4                 # sai se despedindo: some das listas na hora
+.\scripts\remove-node.ps1 node4 -Crash          # (alternativa) cai sem avisar: sai após 3 falhas
+```
+
+O que acontece por dentro:
+
+1. **Entrar**: o nó novo tem `ADVERTISE_URL` (o endereço pelo qual os outros o chamam) e uma
+   semente em `PEERS`. Ao subir, faz `POST /peers` na semente — que chama o nó de volta
+   (`GET /`) e confere se o **genesis** é o mesmo (dificuldade diferente = outro universo,
+   recusado com 409). A resposta traz os peers que a semente conhece; o nó se anuncia a cada
+   um e **sincroniza** a cadeia, porque o push não reenvia o passado.
+2. **Sair avisando** (`docker stop`): no desligamento o nó faz `DELETE /peers` em todos.
+3. **Cair sem avisar** (`docker kill`): ninguém é avisado. Cada push, gossip ou sync sem
+   resposta conta contra o nó; na **3ª chamada seguida** ele sai da lista de cada um. As
+   sementes nunca saem por falha: são o caminho de volta depois de uma queda.
+4. **Repasse**: com listas que mudam, nem todo nó conhece todos — quem **aceita** um bloco ou
+   transação de um peer o repassa aos seus. O 409 de quem já tem é o que impede o laço.
+
+> Os nós base (node1..node3) **não** têm `ADVERTISE_URL`: continuam sementes fixas, e a
+> demo da etapa 8 (`docker compose stop/start node3` + `POST /sync`) segue igual. Para
+> remover um nó extra, use o `remove-node.ps1` (o container dele também é apagado) — de
+> preferência antes do `docker compose down`, para a rede `satus-net` não ficar presa a ele.
 
 ## Observabilidade
 
@@ -161,8 +206,8 @@ curl http://localhost:8080/metrics            # satus_blocks_mined_total{...} 1
 | Serviço | URL | O que mostrar |
 |---------|-----|---------------|
 | Jaeger | http://localhost:16686 | trace do `POST /blocks/mine` atravessando os 3 nós (serviços `node1/node2/node3`) |
-| Prometheus | http://localhost:9090 | targets `up`; query `satus_chain_length` por nó |
-| Grafana | http://localhost:3000 | dashboard **SatusBlockchain — Visão dos nós** (provisionado, acesso anônimo); **Explore → Loki** para logs |
+| Prometheus | http://localhost:9090 | targets `up` — descobertos pelo Docker: um `node4` criado pelo add-node aparece sozinho em até 5s; query `satus_chain_length` por nó |
+| Grafana | http://localhost:3000 | dashboard **SatusBlockchain — Visão dos nós** (provisionado, acesso anônimo), com o número de peers de cada nó e as entradas/saídas da rede; **Explore → Loki** para logs |
 | Loki | http://localhost:3100 | API de logs — `{compose_project="satusblockchain"}` |
 
 **Demo de trace:** mine no node1 → no Jaeger, `Service: node1` → operação

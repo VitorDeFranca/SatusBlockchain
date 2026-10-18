@@ -28,6 +28,11 @@ public class ApiTests
         Assert.Equal(2, json.RootElement.GetProperty("difficulty").GetByte());
         Assert.Equal(1, json.RootElement.GetProperty("blocks").GetInt32());
         Assert.True(json.RootElement.GetProperty("valid").GetBoolean());
+
+        // Etapa 10: o hash do genesis é a "identidade da rede" que o handshake compara.
+        using var chain = await GetJsonAsync(node, "/chain");
+        Assert.Equal(chain.RootElement[0].GetProperty("hash").GetString(),
+            json.RootElement.GetProperty("genesis").GetString());
     }
 
     [Fact]
