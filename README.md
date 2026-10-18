@@ -2,227 +2,102 @@
 
 Blockchain distribuída **educacional e simplificada**, desenvolvida para a disciplina de
 **Sistemas Distribuídos**. Múltiplos nós independentes em .NET 10, comunicação via REST,
-execução local com Docker Compose.
-
-> Este projeto não é uma criptomoeda nem uma blockchain de produção — é um instrumento
-> de aprendizado de conceitos distribuídos (replicação, consenso, consistência eventual,
-> tolerância a falhas).
+execução local com Docker Compose. O objetivo é demonstrar replicação, consenso,
+consistência eventual e tolerância a falhas.
 
 ## Documentação
 
-- [docs/BLOCKCHAIN-FUNDAMENTOS.md](docs/BLOCKCHAIN-FUNDAMENTOS.md) — **comece aqui** se você nunca estudou blockchain: os conceitos necessários para entender o projeto
-- [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — requisitos e limites do projeto
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — arquitetura e decisões técnicas
-- [docs/ROADMAP.md](docs/ROADMAP.md) — etapas incrementais e status
-- [postman/README.md](postman/README.md) — roteiro de teste manual da API no Postman
+- [docs/BLOCKCHAIN-FUNDAMENTOS.md](docs/BLOCKCHAIN-FUNDAMENTOS.md) — conceitos usados pelo projeto: hash, bloco, Proof of Work, mempool, fork e cadeia mais longa
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — entidades, pastas, testes, API, consenso e observabilidade
+- [docs/apresentacao/index.html](docs/apresentacao/index.html) — slides da apresentação (abra no navegador). O que falar está em [docs/apresentacao/ROTEIRO.md](docs/apresentacao/ROTEIRO.md)
+- [postman/README.md](postman/README.md) — ordem de envio da collection, acompanhando o roteiro
 
-## Estrutura
+## Como executar
 
-```
-src/SatusBlockchain.Node/                  # nó da blockchain (ASP.NET Core)
-tests/SatusBlockchain.Node.Tests/          # testes: unidade (Unit/) e integração (Integration/)
-scripts/                                   # add-node.ps1 / remove-node.ps1 (nós entrando e saindo, etapa 10)
-```
+Pré-requisitos: [.NET 10 SDK](https://dotnet.microsoft.com/download) para o nó único e os testes; [Docker Desktop](https://www.docker.com/products/docker-desktop/) para os três nós.
 
-## Como executar (nó único)
+### Nó único
 
 ```powershell
 dotnet build
-dotnet test                                             # tudo: unidade + integração (~50s)
-
-# atalhos: uma pasta por tipo de teste (namespaces Tests.Unit / Tests.Integration)
-dotnet test --filter "FullyQualifiedName~Tests.Unit"         # só unidade  (~20s, sem rede)
-dotnet test --filter "FullyQualifiedName~Tests.Integration"  # só integração (~26s, sobe nós reais)
-
-# sobe o nó (NODE_ID, DIFFICULTY, PEERS e ADVERTISE_URL são opcionais)
 $env:NODE_ID = "node1"
 $env:DIFFICULTY = "4"      # zeros hexadecimais do PoW; padrão 4 (~1s por bloco)
-$env:PEERS = "http://localhost:5166,http://localhost:5167"   # opcional: sementes, os peers iniciais (etapa 6)
-$env:ADVERTISE_URL = "http://localhost:5165"                 # opcional: anuncia-se aos PEERS ao subir (etapa 10)
 dotnet run --project src/SatusBlockchain.Node
 ```
 
-### Testes
-
-Um projeto de teste só, com **uma pasta por tipo** — `Unit/` e `Integration/` — cada uma
-com seu namespace, o que permite rodar só um conjunto pelo filtro:
-
-- **Unidade** (`tests/SatusBlockchain.Node.Tests/Unit`): `Block`, `Hasher`, `ProofOfWork`,
-  `Blockchain`, `Mempool`, `NodeOptions`, `PeerRegistry`, `PeerClient` e `MembershipService`
-  (com `HttpMessageHandler` de mentira) e a telemetria. Testam classes isoladas — sem rede,
-  sem subir processo. Determinísticos e instantâneos.
-- **Integração** (`tests/SatusBlockchain.Node.Tests/Integration`): sobe o executável do nó em
-  uma porta livre e conversa por HTTP — valida rotas, status codes, JSON, `NODE_ID`/`DIFFICULTY`
-  do ambiente e o fluxo mempool → bloco. Na etapa 6, `PropagationTests` liga 2–3 nós por
-  `PEERS` para cobrir o push (bloco propagado, duplicado, adulterado, órfão e peer offline) e,
-  na etapa 7, `TransactionPropagationTests` cobre o gossip (transação que nasce em um nó e é
-  minerada em outro, dedup e transação já confirmada). Na etapa 10, `MembershipTests` sobe nós
-  que entram pela semente com `ADVERTISE_URL` (descoberta, sync na entrada, handshake,
-  despedida e queda), e os testes de propagação ganham o repasse em dois saltos.
-  Um processo novo por teste (isolamento total).
-
-### Uso da API
-
-O nó sobe em `http://localhost:5165` (definido em
-`src/SatusBlockchain.Node/Properties/launchSettings.json`). Para testar no
-Postman, importe `postman/SatusBlockchain.postman_collection.json` — roteiro
-passo a passo em [postman/README.md](postman/README.md).
+O nó sobe em `http://localhost:5165`
+(`src/SatusBlockchain.Node/Properties/launchSettings.json`).
+`PEERS` é opcional, por exemplo `http://localhost:5166,http://localhost:5167`.
 
 ```powershell
-# situação do nó
 curl http://localhost:5165/
 
-# criar transações (vão para a mempool)
 curl -X POST http://localhost:5165/transactions `
   -H "Content-Type: application/json" `
   -d '{"from":"alice","to":"bob","amount":10}'
 
-curl http://localhost:5165/transactions/pending
-
-# minerar um bloco com as transações pendentes (~1s)
 curl -X POST http://localhost:5165/blocks/mine
-
-# conferir a cadeia
 curl http://localhost:5165/chain
-curl http://localhost:5165/chain/validate
 ```
 
-| Endpoint | Descrição |
-|----------|-----------|
-| `GET /` | Identidade, dificuldade, `genesis`, tamanho e validade da cadeia |
-| `GET /chain` | Cadeia completa do nó |
-| `GET /chain/validate` | Valida encadeamento, hashes e Proof of Work |
-| `POST /transactions` | Adiciona transação à mempool **e propaga aos peers** (gossip) |
-| `GET /transactions/pending` | Transações aguardando mineração (**visão local** do nó) |
-| `POST /transactions/receive` | Recebe uma transação propagada (**200** aceita e repassa · **409** duplicada ou já confirmada) |
-| `POST /blocks/mine` | Minera um bloco com a mempool e propaga aos peers (push) |
-| `POST /blocks/receive` | Recebe um bloco propagado (**200** aceito e repassa · **409** se não estende a cadeia) |
-| `GET /peers` | A lista **atual** de peers — nasce de `PEERS` e muda em execução (etapa 10) |
-| `POST /peers` | Um nó se anuncia `{"url": ...}`: handshake (**200** boas-vindas · **409** genesis/`NODE_ID` incompatível · **502** endereço não responde · **400** URL inválida) |
-| `DELETE /peers?url=...` | Um nó se despede e sai da lista (**200**, idempotente) |
-| `POST /sync` | Puxa a cadeia dos peers e adota a **válida mais longa** (órfãs voltam à mempool); com `ADVERTISE_URL`, reanuncia o nó antes |
-| `GET /metrics` | Métricas do nó no formato **Prometheus** (etapa 9): `satus_chain_length`, contadores `satus_*_total`, duração HTTP |
+O contrato completo da API está em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+A collection do Postman fala com os três containers (portas 8080–8082).
 
-## Como executar (3 nós com Docker)
+### Três nós
 
-Cada nó roda em seu próprio container — mesma imagem, 3 processos independentes, cada um
-com sua cadeia em memória. Os nós se enxergam pelo **nome do serviço** dentro da rede.
+Cada container é o mesmo processo, com cadeia própria em memória. Dentro da rede,
+os nós se enxergam pelo nome do serviço.
 
 ```powershell
-docker compose up --build -d      # sobe node1, node2 e node3
+docker compose up --build -d
 docker compose ps                 # os 3 devem aparecer como "healthy"
-
 curl http://localhost:8080/       # node1
 curl http://localhost:8081/       # node2
 curl http://localhost:8082/       # node3
-
-docker compose logs -f node1      # log de um nó
-docker compose down               # derruba tudo
+docker compose logs -f node1
+docker compose down
 ```
 
-| Nó | Do host | Dentro da rede | `NODE_ID` |
-|----|---------|----------------|-----------|
-| node1 | `http://localhost:8080` | `http://node1:8080` | `node1` |
-| node2 | `http://localhost:8081` | `http://node2:8080` | `node2` |
-| node3 | `http://localhost:8082` | `http://node3:8080` | `node3` |
+| Nó | Do host | Dentro da rede |
+|----|---------|----------------|
+| node1 | `http://localhost:8080` | `http://node1:8080` |
+| node2 | `http://localhost:8081` | `http://node2:8080` |
+| node3 | `http://localhost:8082` | `http://node3:8080` |
 
-Os endereços `http://nodeN:8080` são o canal **entre os nós** — é por eles que a propagação
-passa (é o valor de `PEERS` no `docker-compose.yml`). Para comprovar que eles se enxergam,
-de dentro de um container:
-
-```powershell
-docker compose exec node2 curl -s http://node1:8080/
-```
-
-**Dificuldade do PoW:** os containers usam `NODE_DIFFICULTY` (padrão `4` = ~1s por bloco,
-tempo suficiente para acompanhar a propagação acontecendo). Para uma demo rápida, com
-mineração em milissegundos:
+Os três nós precisam da mesma dificuldade: o genesis é minerado nela. No Compose a
+variável é `NODE_DIFFICULTY` (padrão `4`, cerca de 1 s por bloco). Para mineração
+em milissegundos:
 
 ```powershell
 $env:NODE_DIFFICULTY = "2"
-docker compose up -d --force-recreate      # mineração instantânea
+docker compose up -d --force-recreate
 ```
 
-> Os **três** nós precisam da mesma dificuldade: o genesis é minerado na dificuldade do
-> nó, então genesis(dif 2) ≠ genesis(dif 4) e um bloco minerado com 2 zeros não satisfaz o
-> PoW de quem exige 4 — o peer recusaria tudo (409). Por isso os serviços compartilham a
-> mesma `${NODE_DIFFICULTY:-4}`; confira em `GET /` (`difficulty` e `genesis`).
+### Observabilidade
 
-## Nós entrando e saindo com o sistema rodando (etapa 10)
-
-Os três nós do compose são as **sementes**. Outros nós entram e saem sem reiniciar nem
-reconfigurar ninguém:
+O compose base sobe só os três nós. O overlay acrescenta Jaeger, Prometheus, Grafana,
+Loki e Alloy. `GET /metrics` existe nos dois casos.
 
 ```powershell
-docker compose up --build -d                    # sementes: node1, node2, node3
-
-.\scripts\add-node.ps1 node4 -HostPort 8083     # cria o node4 (molde node-extra do compose)
-docker logs -f node4                            # anúncio, descoberta e sync da entrada
-curl http://localhost:8080/peers                # o node1 já lista http://node4:8080
-curl http://localhost:8083/chain                # o node4 nasceu com a cadeia da rede
-
-curl -X POST http://localhost:8083/blocks/mine  # minerado no node4 → chega aos outros
-
-.\scripts\remove-node.ps1 node4                 # sai se despedindo: some das listas na hora
-.\scripts\remove-node.ps1 node4 -Crash          # (alternativa) cai sem avisar: sai após 3 falhas
-```
-
-O que acontece por dentro:
-
-1. **Entrar**: o nó novo tem `ADVERTISE_URL` (o endereço pelo qual os outros o chamam) e uma
-   semente em `PEERS`. Ao subir, faz `POST /peers` na semente — que chama o nó de volta
-   (`GET /`) e confere se o **genesis** é o mesmo (dificuldade diferente = outro universo,
-   recusado com 409). A resposta traz os peers que a semente conhece; o nó se anuncia a cada
-   um e **sincroniza** a cadeia, porque o push não reenvia o passado.
-2. **Sair avisando** (`docker stop`): no desligamento o nó faz `DELETE /peers` em todos.
-3. **Cair sem avisar** (`docker kill`): ninguém é avisado. Cada push, gossip ou sync sem
-   resposta conta contra o nó; na **3ª chamada seguida** ele sai da lista de cada um. As
-   sementes nunca saem por falha: são o caminho de volta depois de uma queda.
-4. **Repasse**: com listas que mudam, nem todo nó conhece todos — quem **aceita** um bloco ou
-   transação de um peer o repassa aos seus. O 409 de quem já tem é o que impede o laço.
-
-> Os nós base (node1..node3) **não** têm `ADVERTISE_URL`: continuam sementes fixas, e a
-> demo da etapa 8 (`docker compose stop/start node3` + `POST /sync`) segue igual. Para
-> remover um nó extra, use o `remove-node.ps1` (o container dele também é apagado) — de
-> preferência antes do `docker compose down`, para a rede `satus-net` não ficar presa a ele.
-
-## Observabilidade
-
-O nó instrumenta os três pilares com **OpenTelemetry**: logs (o `ILogger`, coletados pelo
-**Alloy** e enviados ao **Loki**), métricas (`GET /metrics`, raspadas pelo **Prometheus** e
-exibidas no **Grafana**) e traces (enviados por OTLP ao **Jaeger** quando
-`OTEL_EXPORTER_OTLP_ENDPOINT` está definido).
-
-```powershell
-# stack completa: 3 nós + Jaeger + Prometheus + Grafana + Loki + Alloy (overlay; o compose base não muda)
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
-
-curl http://localhost:8080/metrics            # métricas do node1 (sempre disponível)
-curl -X POST http://localhost:8080/blocks/mine
-Start-Sleep -Seconds 3                        # a leitura tem ~2s de atraso assíncrono
-curl http://localhost:8080/metrics            # satus_blocks_mined_total{...} 1
 ```
 
-| Serviço | URL | O que mostrar |
-|---------|-----|---------------|
-| Jaeger | http://localhost:16686 | trace do `POST /blocks/mine` atravessando os 3 nós (serviços `node1/node2/node3`) |
-| Prometheus | http://localhost:9090 | targets `up` — descobertos pelo Docker: um `node4` criado pelo add-node aparece sozinho em até 5s; query `satus_chain_length` por nó |
-| Grafana | http://localhost:3000 | dashboard **SatusBlockchain — Visão dos nós** (provisionado, acesso anônimo), com o número de peers de cada nó e as entradas/saídas da rede; **Explore → Loki** para logs |
-| Loki | http://localhost:3100 | API de logs — `{compose_project="satusblockchain"}` |
+| Serviço | URL |
+|---------|-----|
+| Jaeger | http://localhost:16686 |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 |
+| Loki | http://localhost:3100 |
 
-**Demo de trace:** mine no node1 → no Jaeger, `Service: node1` → operação
-`POST /blocks/mine` → um trace com o span `mine` (o PoW) e os spans `POST /blocks/receive`
-do **node2** e do **node3** — o `traceparent` atravessa a rede: é a prova visual de sistemas
-distribuídos, com um trace só para toda a propagação.
+Catálogo de métricas, traces e o caminho dos logs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), seção 10.
 
-**Demo de logs:** mine de novo → no Grafana, **Explore → datasource Loki** → LogQL
-`{compose_project="satusblockchain", container="node1"} |= "minerado"` → a linha
-`Bloco N minerado...`. O caminho é: `ILogger` → console do container → Docker → Alloy →
-Loki → Grafana (o Alloy só coleta os containers deste compose, por label do Docker).
+### Testes
 
-Sem o overlay, `docker compose up` continua sendo apenas os 3 nós: o `/metrics` segue
-disponível (é pull), mas nada é exportado — sem Jaeger, sem Prometheus, e os logs ficam só
-no `docker compose logs`.
+```powershell
+dotnet test                                              # unidade + integração
+dotnet test --filter "FullyQualifiedName~Tests.Unit"         # sem rede
+dotnet test --filter "FullyQualifiedName~Tests.Integration"  # sobe o nó e fala HTTP
+```
 
-> Detalhes, catálogo de métricas e decisões em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-> (seção 10) e [docs/ROADMAP.md](docs/ROADMAP.md) (notas da etapa 9).
+O que cada pasta cobre está na [arquitetura](docs/ARCHITECTURE.md). A narrativa
+da apresentação está no [roteiro](docs/apresentacao/ROTEIRO.md).

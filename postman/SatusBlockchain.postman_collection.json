@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "3f7c1b90-6c4a-4f2e-9a10-8d5b2e7c4a11",
     "name": "SatusBlockchain",
-    "description": "API collection da blockchain didática SatusBlockchain.\n\nANTES DE COMECAR:\n1. Suba o no com DIFFICULTY=4.\n2. Confira a variavel node1Url (padrao http://localhost:8080).\n3. Se mudar a DIFFICULTY, atualize a variavel difficulty (ela e usada no teste de Proof of Work).\n\nORDEM: execute os requests de 1 a 8. Para rodar tudo de uma vez com os testes automatizados, use o Collection Runner (botao 'Run').",
+    "description": "Collection da demo ao vivo. Cada pasta é um passo de docs/apresentacao/ROTEIRO.md.\n\nEnviem os requests de cima para baixo, uma pasta por vez. Não usem o Collection Runner: as pastas 4, 5 e 8 exigem um comando de terminal no meio.\n\nPré-requisito: docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d, com os três nós healthy. Dificuldade 4.\n\nUm teste verde confirma o campo que a narrativa cita. Vermelho quase sempre significa que o request anterior, ou o docker do meio do passo, foi pulado.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -19,968 +19,2101 @@
       "value": "http://localhost:8082"
     },
     {
+      "key": "node4Url",
+      "value": "http://localhost:8083"
+    },
+    {
       "key": "difficulty",
       "value": "4"
-    },
-    {
-      "key": "prometheusUrl",
-      "value": "http://localhost:9090"
-    },
-    {
-      "key": "jaegerUrl",
-      "value": "http://localhost:16686"
-    },
-    {
-      "key": "lokiUrl",
-      "value": "http://localhost:3100"
-    },
-    {
-      "key": "grafanaUrl",
-      "value": "http://localhost:3000"
     }
   ],
   "item": [
     {
-      "name": "1. Situacao do no",
-      "event": [
+      "name": "0. Baseline",
+      "description": "Três nós no genesis, o mesmo latestHash. Se a cadeia estiver suja de um ensaio: docker compose restart node1 node2 node3 e esperem healthy.",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const no = pm.response.json();",
-              "pm.test('identifica o no (NODE_ID)', () => pm.expect(no.node).to.be.a('string'));",
-              "pm.test('existe pelo menos o genesis', () => pm.expect(no.blocks).to.be.at.least(1));",
-              "pm.test('cadeia valida', () => pm.expect(no.valid).to.be.true);",
-              "pm.test('informa o hash do genesis (identidade da rede, etapa 10)', () => pm.expect(no.genesis).to.have.lengthOf(64));"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/",
-          "host": ["{{node1Url}}"],
-          "path": [""]
-        },
-        "description": "GET / — identidade do no, dificuldade, hash do genesis, tamanho e validade da cadeia. E o request de 'o no esta de pe?' — e, desde a etapa 10, o que o handshake de POST /peers le para conferir se um no novo nasceu do mesmo genesis."
-      }
-    },
-    {
-      "name": "2. Cadeia completa",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const cadeia = pm.response.json();",
-              "pm.test('e uma lista de blocos', () => pm.expect(cadeia).to.be.an('array').that.is.not.empty);",
-              "pm.test('o primeiro bloco e o genesis (indice 0)', () => pm.expect(cadeia[0].index).to.eql(0));",
-              "pm.test('o genesis aponta para o hash zero', () => pm.expect(cadeia[0].previousHash).to.eql('0'));",
-              "pm.test('todo bloco tem hash de 64 caracteres', () => {",
-              "    cadeia.forEach((bloco) => pm.expect(bloco.hash).to.have.lengthOf(64));",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/chain",
-          "host": ["{{node1Url}}"],
-          "path": ["chain"]
-        },
-        "description": "GET /chain — a cadeia inteira em JSON. O bloco 0 e o genesis (mesmo em todos os nos)."
-      }
-    },
-
-    {
-      "name": "3. Validar cadeia",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('cadeia valida (encadeamento + PoW)', () => pm.expect(r.valid).to.be.true);",
-              "pm.test('informa o tamanho da cadeia', () => pm.expect(r.length).to.be.at.least(1));",
-              "pm.test('informa o hash do ultimo bloco', () => pm.expect(r.latestHash).to.have.lengthOf(64));"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/chain/validate",
-          "host": ["{{node1Url}}"],
-          "path": ["chain", "validate"]
-        },
-        "description": "GET /chain/validate — recalcula o encadeamento e o Proof of Work de toda a cadeia. Se alguem mexer num bloco, isto vira false."
-      }
-    },
-
-    {
-      "name": "4. Criar transacao (alice -> bob)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('201 Created', () => pm.response.to.have.status(201));",
-              "pm.test('Location aponta para a mempool', () => pm.expect(pm.response.headers.get('Location')).to.eql('/transactions/pending'));",
-              "",
-              "const tx = pm.response.json();",
-              "pm.test('devolve a transacao recebida', () => {",
-              "    pm.expect(tx.from).to.eql('alice');",
-              "    pm.expect(tx.to).to.eql('bob');",
-              "    pm.expect(Number(tx.amount)).to.eql(10);",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"from\": \"alice\",\n  \"to\": \"bob\",\n  \"amount\": 10\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "url": {
-          "raw": "{{node1Url}}/transactions",
-          "host": ["{{node1Url}}"],
-          "path": ["transactions"]
-        },
-        "description": "POST /transactions — coloca a transacao na mempool (a fila de espera). Ainda NAO virou bloco: ela so entra na cadeia quando alguem minerar."
-      }
-    },
-
-    {
-      "name": "5. Criar transacao (bob -> carol)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('201 Created', () => pm.response.to.have.status(201));",
-              "",
-              "const tx = pm.response.json();",
-              "pm.test('segunda transacao aceita na mempool', () => {",
-              "    pm.expect(tx.from).to.eql('bob');",
-              "    pm.expect(tx.to).to.eql('carol');",
-              "    pm.expect(Number(tx.amount)).to.eql(5);",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"from\": \"bob\",\n  \"to\": \"carol\",\n  \"amount\": 5\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "url": {
-          "raw": "{{node1Url}}/transactions",
-          "host": ["{{node1Url}}"],
-          "path": ["transactions"]
-        },
-        "description": "POST /transactions — a mempool aceita varias transacoes; todas as pendentes entram no proximo bloco minerado."
-      }
-    },
-
-    {
-      "name": "6. Ver pendentes (antes de minerar)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const pendentes = pm.response.json();",
-              "pm.test('e uma lista de transacoes', () => pm.expect(pendentes).to.be.an('array').that.is.not.empty);",
-              "pm.test('contem a transacao alice -> bob', () => {",
-              "    const achou = pendentes.some((t) => t.from === 'alice' && t.to === 'bob' && Number(t.amount) === 10);",
-              "    pm.expect(achou).to.be.true;",
-              "});",
-              "pm.test('nada foi para a cadeia ainda', () => pm.expect(pendentes.length).to.be.at.least(1));"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/transactions/pending",
-          "host": ["{{node1Url}}"],
-          "path": ["transactions", "pending"]
-        },
-        "description": "GET /transactions/pending — o conteudo da mempool. Note que as transacoes existem aqui, mas ainda NAO estao em nenhum bloco."
-      }
-    },
-
-    {
-      "name": "7. Minerar bloco",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK (a cadeia nao mudou durante a mineracao)', () => pm.response.to.have.status(200));",
-              "",
-              "const bloco = pm.response.json();",
-              "pm.test('bloco encadeado no topo da cadeia', () => {",
-              "    pm.expect(bloco.index).to.be.at.least(1);",
-              "    pm.expect(bloco.previousHash).to.have.lengthOf(64);",
-              "});",
-              "pm.test('Proof of Work valido (hash com N zeros)', () => {",
-              "    const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
-              "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
-              "});",
-              "pm.test('leva as transacoes pendentes para dentro do bloco', () => pm.expect(bloco.transactions).to.be.an('array'));",
-              "pm.test('toda transacao tem valor > 0', () => {",
-              "    bloco.transactions.forEach((t) => pm.expect(Number(t.amount)).to.be.above(0));",
-              "});",
-              "pm.test('nonce foi encontrado (>= 0)', () => pm.expect(bloco.nonce).to.be.at.least(0));"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/blocks/mine",
-          "host": ["{{node1Url}}"],
-          "path": ["blocks", "mine"]
-        },
-        "description": "POST /blocks/mine — minera com o que estiver na mempool e anexa o bloco a cadeia. Aqui o Proof of Work roda de verdade: na dificuldade 4 leva ~1 segundo (por isso DIFFICULTY=2 no teste manual).\n\nSe responder 409, a cadeia avancou durante a mineracao: as transacoes continuam pendentes, basta minerar de novo."
-      }
-    },
-
-    {
-      "name": "8. Ver pendentes (depois de minerar)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const pendentes = pm.response.json();",
-              "pm.test('mempool esvaziada: tudo virou bloco', () => pm.expect(pendentes).to.be.an('array').that.is.empty);"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/transactions/pending",
-          "host": ["{{node1Url}}"],
-          "path": ["transactions", "pending"]
-        },
-        "description": "GET /transactions/pending — depois da mineracao a fila fica vazia: as transacoes passaram de 'pendentes' para 'dentro do bloco 1'."
-      }
-    },
-
-    {
-      "name": "9. Transacao invalida (400)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
-              "",
-              "const erro = pm.response.json();",
-              "pm.test('explica o motivo da recusa', () => pm.expect(erro.error).to.include('From'));"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"from\": \"\",\n  \"to\": \"bob\",\n  \"amount\": 10\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "url": {
-          "raw": "{{node1Url}}/transactions",
-          "host": ["{{node1Url}}"],
-          "path": ["transactions"]
-        },
-        "description": "POST /transactions com From vazio — a API valida a entrada e recusa com 400 (a transacao NAO entra na mempool).\n\nOutros casos que tambem dao 400: To vazio e Amount <= 0 (teste trocando o corpo)."
-      }
-    },
-
-    {
-      "name": "10. Cadeia depois da mineracao",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const cadeia = pm.response.json();",
-              "pm.test('a cadeia cresceu (genesis + bloco minerado)', () => pm.expect(cadeia.length).to.be.at.least(2));",
-              "pm.test('cada bloco aponta para o hash do anterior', () => {",
-              "    for (let i = 1; i < cadeia.length; i++) {",
-              "        pm.expect(cadeia[i].index).to.eql(cadeia[i - 1].index + 1, 'indice do bloco ' + i);",
-              "        pm.expect(cadeia[i].previousHash).to.eql(cadeia[i - 1].hash, 'elo quebrado no bloco ' + i);",
-              "    }",
-              "});",
-              "pm.test('o ultimo bloco tem as transacoes mineradas', () => {",
-              "    const ultimo = cadeia[cadeia.length - 1];",
-              "    pm.expect(ultimo.transactions).to.be.an('array');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/chain",
-          "host": ["{{node1Url}}"],
-          "path": ["chain"]
-        },
-        "description": "GET /chain — confere o encadeamento de ponta a ponta: e essa verificacao de 'previousHash de um == hash do outro' que faz a cadeia ser a cadeia."
-      }
-    },
-
-    {
-      "name": "11. Peers do no (etapas 6 e 10)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('identifica o no', () => pm.expect(r.node).to.be.a('string'));",
-              "pm.test('peers e uma lista (vazia em no isolado)', () => pm.expect(r.peers).to.be.an('array'));",
-              "pm.test('cada peer e uma URL http(s) absoluta', () => {",
-              "    r.peers.forEach((peer) => pm.expect(peer.startsWith('http')).to.be.true);",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/peers",
-          "host": ["{{node1Url}}"],
-          "path": ["peers"]
-        },
-        "description": "GET /peers — a lista ATUAL de peers do no: e para esses enderecos que o POST /blocks/mine faz push do bloco novo (POST /blocks/receive). Ela nasce de PEERS e, desde a etapa 10, muda em execucao: entra quem se anuncia (POST /peers), sai quem se despede (DELETE /peers) ou para de responder. Com os 3 containers, o node1 responde http://node2:8080 e http://node3:8080 — mais os nos criados pelo scripts/add-node.ps1; sem PEERS a lista comeca vazia. O campo url e o ADVERTISE_URL do no (null nos nos base)."
-      }
-    },
-
-    {
-      "name": "12. Receber transacao propagada",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 (aceita) ou 409 (ja estava na mempool: dedup)', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));",
-              "",
-              "const r = pm.response.json();",
-              "if (pm.response.code === 200) {",
-              "    pm.test('confirma que entrou na mempool local', () => pm.expect(r.accepted).to.be.true);",
-              "    pm.test('informa quantas transacoes estao pendentes', () => pm.expect(r.pending).to.be.at.least(1));",
-              "} else {",
-              "    pm.test('a recusa vem explicada (duplicada ou ja confirmada)', () => pm.expect(r.accepted).to.be.false);",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"from\": \"alice\",\n  \"to\": \"bob\",\n  \"amount\": 25\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "url": {
-          "raw": "{{node1Url}}/transactions/receive",
-          "host": ["{{node1Url}}"],
-          "path": ["transactions", "receive"]
-        },
-        "description": "POST /transactions/receive — o endpoint que um PEER chama (nao o cliente): e aqui que o gossip da etapa 7 entrega a transacao. 200 = entrou na mempool local; 409 = ja estava pendente (dedup) ou ja esta confirmada em um bloco."
-      }
-    },
-    {
-      "name": "13. Sincronizar chain",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK (peer fora do ar e situacao normal: quem informa e o relatorio)', () => pm.response.to.have.status(200));",
-              "",
-              "const relatorio = pm.response.json();",
-              "pm.test('relatorio traz o antes/depois e o desfecho por peer', () => {",
-              "    pm.expect(relatorio.previousLength).to.be.a('number');",
-              "    pm.expect(relatorio.length).to.be.a('number');",
-              "    pm.expect(relatorio.orphansBackToMempool).to.be.a('number');",
-              "    pm.expect(relatorio.peers).to.be.an('array');",
-              "});",
-              "pm.test('se adotou, veio de um peer e a cadeia nao encolheu', () => {",
-              "    if (relatorio.adopted !== null) {",
-              "        pm.expect(relatorio.adopted.from).to.be.a('string');",
-              "        pm.expect(relatorio.length).to.be.above(relatorio.previousLength);",
-              "    }",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/sync",
-          "host": ["{{node1Url}}"],
-          "path": ["sync"]
-        },
-        "description": "POST /sync (etapa 8) — o no PUXA a cadeia de cada peer e adota a valida mais longa; as transacoes dos blocos orfaos voltam para a mempool. Troque a URL para node2Url/node3Url para recuperar um no que ficou atras. A resposta traz adopted, orphansBackToMempool e o desfecho por peer (Adopted/Kept/Invalid/Unreachable)."
-      }
-    },
-    {
-      "name": "14. Metricas (GET /metrics)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK (pull: e o mesmo caminho que o Prometheus raspa)', () => pm.response.to.have.status(200));",
-              "",
-              "const corpo = pm.response.text();",
-              "pm.test('gauge da cadeia presente com valor numerico', () => {",
-              "    pm.expect(corpo).to.match(/satus_chain_length\\{[^}]*\\} \\d+/);",
-              "});",
-              "pm.test('metadados TYPE do Prometheus presentes', () => {",
-              "    pm.expect(corpo).to.include('# TYPE satus_chain_length gauge');",
-              "});",
-              "pm.test('counter de mineracao (apos o request 7) usa o sufixo _total', () => {",
-              "    if (corpo.includes('satus_blocks_mined')) {",
-              "        pm.expect(corpo).to.include('satus_blocks_mined_total');",
-              "    }",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/metrics",
-          "host": ["{{node1Url}}"],
-          "path": ["metrics"]
-        },
-        "description": "GET /metrics (etapa 9) — metricas do no no formato Prometheus, o mesmo endpoint que o Prometheus raspa. Gauges (satus_chain_length, satus_mempool_size) existem desde a subida e mostram o estado atual; counters (satus_blocks_mined_total etc.) nascem na primeira medicao. Os valores vem com labels otel_scope_name/otel_scope_version no meio (convencao do formato). Apos minerar (request 7), o valor pode levar ~2s para aparecer."
-      }
-    },
-    {
-      "name": "15. Prometheus consulta metricas",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK (API HTTP do Prometheus)', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('resultado e uma serie de instantaneo', () => {",
-              "    pm.expect(r.status).to.eql('success');",
-              "    pm.expect(r.data.resultType).to.eql('vector');",
-              "});",
-              "pm.test('satus_chain_length tem valor >= 1', () => {",
-              "    const v = parseFloat(r.data.result[0].value[1]);",
-              "    pm.expect(v).to.be.at.least(1);",
-              "});",
-              "pm.test('a serie identifica o no (instance)', () => {",
-              "    pm.expect(r.data.result[0].metric.instance).to.be.a('string');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{prometheusUrl}}/api/v1/query?query=satus_chain_length",
-          "host": ["{{prometheusUrl}}"],
-          "path": ["api", "v1", "query"],
-          "query": [
+          "name": "0.1 node1 — GET /",
+          "event": [
             {
-              "key": "query",
-              "value": "satus_chain_length"
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const no = pm.response.json();",
+                  "pm.test('identifica o nó', () => pm.expect(no.node).to.be.a('string'));",
+                  "pm.test('dificuldade da demo', () => pm.expect(no.difficulty).to.eql(Number(pm.collectionVariables.get('difficulty'))));",
+                  "pm.test('existe pelo menos o genesis', () => pm.expect(no.blocks).to.be.at.least(1));",
+                  "pm.test('cadeia válida', () => pm.expect(no.valid).to.be.true);"
+                ]
+              }
             }
-          ]
-        },
-        "description": "GET /api/v1/query (Prometheus) — consulta instantanea da mesma metrica do request 14, mas pelo lado do Prometheus: prova que o PULL funcionou (ele raspa os 3 nos a cada 5s). Rode o request 7 (mine) antes e veja o valor subir em ~5s. Sem filtro, a query devolve as 3 series (um valor por no)."
-      }
-    },
-    {
-      "name": "16. Prometheus targets saudaveis",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "const alvos = r.data.activeTargets;",
-              "pm.test('ao menos 4 alvos ativos: 3 nos (+ extras) + autoscraping do Prometheus', () => {",
-              "    pm.expect(alvos.length).to.be.at.least(4);",
-              "});",
-              "pm.test('todos com health=up (scrape sem falha)', () => {",
-              "    const caidos = alvos.filter(t => t.health !== 'up').map(t => t.scrapeUrl);",
-              "    pm.expect(caidos).to.eql([]);",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{prometheusUrl}}/api/v1/targets?state=active",
-          "host": ["{{prometheusUrl}}"],
-          "path": ["api", "v1", "targets"],
-          "query": [
-            {
-              "key": "state",
-              "value": "active"
-            }
-          ]
-        },
-        "description": "GET /api/v1/targets (Prometheus) — saude de todos os alvos de scrape: os nos + o proprio Prometheus. Desde a etapa 10 os alvos sao DESCOBERTOS pelo Docker (docker_sd_configs): um node4 criado pelo scripts/add-node.ps1 aparece aqui sozinho em ate 5s, e some quando o container e removido. health=up = raspagem do /metrics funcionando; se um no cair, aparece health=down aqui (e na UI http://localhost:9090/targets)."
-      }
-    },
-    {
-      "name": "17. Jaeger lista traces",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK (API do Jaeger)', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('os 3 nos aparecem como servicos distintos', () => {",
-              "    const servicos = (r.services || []).map(s => s.name || s);",
-              "    ['node1', 'node2', 'node3'].forEach(n => {",
-              "        pm.expect(servicos, `${n} ausente — mine (request 7) e aguarde ~3s`).to.include(n);",
-              "    });",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{jaegerUrl}}/api/v3/services",
-          "host": ["{{jaegerUrl}}"],
-          "path": ["api", "v3", "services"]
-        },
-        "description": "GET /api/v3/services (Jaeger v2) — servicos que exportaram traces. service.name = NODE_ID, entao node1/node2/node3 aparecem separados (e o UI desenha o mapa de dependencias entre eles). Lista vazia = a stack nao subiu com o overlay (OTEL_EXPORTER_OTLP_ENDPOINT), que e de proposito: sem Jaeger, o export fica desligado."
-      }
-    },
-    {
-      "name": "18. Jaeger busca trace de mineracao",
-      "event": [
-        {
-          "listen": "prerequest",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "// A API v3 do Jaeger exige a janela de busca em RFC3339 (UTC).",
-              "const fmt = d => d.toISOString().replace(/\\.\\d{3}Z$/, 'Z');",
-              "pm.variables.set('startTimeMin', fmt(new Date(Date.now() - 60 * 60 * 1000)));",
-              "pm.variables.set('startTimeMax', fmt(new Date()));"
-            ]
-          }
-        },
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('sem erro da API', () => pm.expect(r.error).to.be.undefined);",
-              "",
-              "// Formato OTLP: result.resourceSpans[].scopeSpans[].spans[]",
-              "const spans = [];",
-              "((r.result || {}).resourceSpans || []).forEach(rs => {",
-              "    const svc = (rs.resource.attributes || []).find(a => a.key === 'service.name');",
-              "    const nome = svc ? svc.value.stringValue : 'desconhecido';",
-              "    (rs.scopeSpans || []).forEach(ss => (ss.spans || []).forEach(sp => spans.push({ nome: sp.name, service: nome })));",
-              "});",
-              "",
-              "pm.test('ha spans (mine antes e aguarde ~3s se vazio)', () => {",
-              "    pm.expect(spans.length, 'sem spans: rode o request 7 e rode de novo').to.be.at.least(1);",
-              "});",
-              "",
-              "if (spans.length > 0) {",
-              "    pm.test('inclui span de HTTP de entrada (POST)', () => {",
-              "        pm.expect(spans.some(s => (s.nome || '').includes('POST'))).to.be.true;",
-              "    });",
-              "    const servicos = [...new Set(spans.map(s => s.service))];",
-              "    if (servicos.length > 1) {",
-              "        pm.test('trace cruzou mais de um no (propagacao do traceparent)', () => {",
-              "            pm.expect(servicos.length).to.be.at.least(2);",
-              "        });",
-              "    }",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{jaegerUrl}}/api/v3/traces?query.service=node1&query.operation_name=POST%20/blocks/mine&query.startTimeMin={{startTimeMin}}&query.startTimeMax={{startTimeMax}}&query.limit=5",
-          "host": ["{{jaegerUrl}}"],
-          "path": ["api", "v3", "traces"],
-          "query": [
-            {
-              "key": "query.service",
-              "value": "node1"
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                ""
+              ]
             },
+            "description": "Identidade do node1. Leiam node, difficulty 4, blocks 1, valid true."
+          }
+        },
+        {
+          "name": "0.2 node2 — GET /",
+          "event": [
             {
-              "key": "query.operation_name",
-              "value": "POST /blocks/mine"
-            },
-            {
-              "key": "query.startTimeMin",
-              "value": "{{startTimeMin}}"
-            },
-            {
-              "key": "query.startTimeMax",
-              "value": "{{startTimeMax}}"
-            },
-            {
-              "key": "query.limit",
-              "value": "5"
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const no = pm.response.json();",
+                  "pm.test('identifica o nó', () => pm.expect(no.node).to.be.a('string'));",
+                  "pm.test('dificuldade da demo', () => pm.expect(no.difficulty).to.eql(Number(pm.collectionVariables.get('difficulty'))));",
+                  "pm.test('existe pelo menos o genesis', () => pm.expect(no.blocks).to.be.at.least(1));",
+                  "pm.test('cadeia válida', () => pm.expect(no.valid).to.be.true);"
+                ]
+              }
             }
-          ]
-        },
-        "description": "GET /api/v3/traces (Jaeger v2) — traces do POST /blocks/mine do node1 na ultima hora (a janela de tempo e calculada no pre-request script, pois a API v3 exige startTimeMin/Max em RFC3339; o filtro operation_name evita os traces de scrape do Prometheus afogarem o resultado). Depois de minerar (request 7) o trace contem: o span de entrada POST /blocks/mine, o span proprio 'mine' e — pela propagacao do traceparent — os POST /blocks/receive nos nodes 2 e 3 na MESMA arvore. Abra no UI: http://localhost:16686/trace/<traceId>. Batch OTLP com delay de 1s; se vier vazio, aguarde e rode de novo."
-      }
-    },
-    {
-      "name": "19. Loki labels do projeto",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK (API do Loki)', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('label compose_project so tem o projeto da aula', () => {",
-              "    pm.expect(r.data).to.include('satusblockchain');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{lokiUrl}}/loki/api/v1/label/compose_project/values",
-          "host": ["{{lokiUrl}}"],
-          "path": ["loki", "api", "v1", "label", "compose_project", "values"]
-        },
-        "description": "GET /loki/api/v1/label/... (Loki) — valores do label de projeto. O Alloy so coleta containers deste compose (filtro por label do Docker), entao 'satusblockchain' e o unico valor. Caminho dos logs: ILogger -> console do container -> Docker -> Alloy -> Loki -> Grafana."
-      }
-    },
-    {
-      "name": "20. Loki busca logs de mineracao",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('encontrou streams (mine e espere ~5s se vazio)', () => {",
-              "    pm.expect(r.data.result.length, 'sem logs: rode o request 7 e rode de novo').to.be.at.least(1);",
-              "});",
-              "",
-              "if (r.data.result.length > 0) {",
-              "    const stream = r.data.result[0];",
-              "    pm.test('stream identifica o container', () => {",
-              "        pm.expect(stream.stream.container).to.match(/^node\\d+$/);",
-              "    });",
-              "    const temMineracao = r.data.result.some(s => s.values.some(v => v[1].includes('minerado')));",
-              "    if (temMineracao) {",
-              "        pm.test('log de bloco minerado presente', () => pm.expect(temMineracao).to.be.true);",
-              "    }",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{lokiUrl}}/loki/api/v1/query_range?query=%7Bcompose_project%3D%22satusblockchain%22%7D&limit=10",
-          "host": ["{{lokiUrl}}"],
-          "path": ["loki", "api", "v1", "query_range"],
-          "query": [
-            {
-              "key": "query",
-              "value": "{compose_project=\"satusblockchain\"}"
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                ""
+              ]
             },
+            "description": "O mesmo retrato, no node2. Três processos, três memórias."
+          }
+        },
+        {
+          "name": "0.3 node3 — GET /",
+          "event": [
             {
-              "key": "limit",
-              "value": "10"
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const no = pm.response.json();",
+                  "pm.test('identifica o nó', () => pm.expect(no.node).to.be.a('string'));",
+                  "pm.test('dificuldade da demo', () => pm.expect(no.difficulty).to.eql(Number(pm.collectionVariables.get('difficulty'))));",
+                  "pm.test('existe pelo menos o genesis', () => pm.expect(no.blocks).to.be.at.least(1));",
+                  "pm.test('cadeia válida', () => pm.expect(no.valid).to.be.true);"
+                ]
+              }
             }
-          ]
-        },
-        "description": "GET /loki/api/v1/query_range (Loki) — consulta LogQL dos logs mais recentes da stack inteira. Para filtrar: query={compose_project=\"satusblockchain\", container=\"node1\"} ou acrescente |= \"minerado\". O mesmo LogQL roda no Grafana Explore (datasource Loki) e no dashboard."
-      }
-    },
-    {
-      "name": "21. Grafana saude e datasources",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK (Grafana no ar)', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('banco de dados do Grafana ok', () => pm.expect(r.database).to.eql('ok'));",
-              "",
-              "pm.sendRequest('{{grafanaUrl}}/api/datasources', (err, resp) => {",
-              "    if (err) { throw new Error(err); }",
-              "    const nomes = resp.json().map(d => d.name);",
-              "    pm.test('datasources provisionadas: Prometheus + Loki', () => {",
-              "        pm.expect(nomes).to.include.members(['Prometheus', 'Loki']);",
-              "    });",
-              "    pm.done();",
-              "});"
-            ]
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "O mesmo retrato, no node3."
           }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{grafanaUrl}}/api/health",
-          "host": ["{{grafanaUrl}}"],
-          "path": ["api", "health"]
         },
-        "description": "GET /api/health (Grafana) — Grafana no ar e, via chamada aninhada, as 2 datasources provisionadas (Prometheus + Loki) sem clique manual. Dashboards: http://localhost:3000/d/satus-nos (painel dos 3 nos) e Explore para logs. Acesso anonimo em modo leitura; admin/admin para editar."
-      }
-    },
-    {
-      "name": "22. Despedida de um peer (DELETE /peers)",
-      "event": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK (idempotente: 200 mesmo se o peer ja nao estava na lista)', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('informa se removeu', () => pm.expect(r.removed).to.be.a('boolean'));",
-              "pm.test('o peer nao esta mais na lista', () => pm.expect(r.peers).to.not.include('http://node3:8080'));"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "DELETE",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/peers?url=http://node3:8080",
-          "host": ["{{node1Url}}"],
-          "path": ["peers"],
-          "query": [
+          "name": "0.4 node1 — GET /peers",
+          "event": [
             {
-              "key": "url",
-              "value": "http://node3:8080"
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('node1 anuncia node2 e node3', () => {",
+                  "    pm.expect(r.peers).to.include.members(['http://node2:8080', 'http://node3:8080']);",
+                  "});"
+                ]
+              }
             }
-          ]
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/peers",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "Lista estática vinda de PEERS. O node1 conhece http://node2:8080 e http://node3:8080. Sem registry, sem líder."
+          }
         },
-        "description": "DELETE /peers?url=... (etapa 10) — o que um no manda ao ser desligado com docker stop: 'estou saindo, me tire da lista'. Aqui o node1 tira o node3 da lista DELE (so dele: cada no tem a sua). A partir dai o push do node1 nao vai mais ao node3 — rode o request 24 para recoloca-lo."
-      }
-    },
-    {
-      "name": "23. Peers depois da despedida",
-      "event": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('node3 saiu da lista do node1', () => pm.expect(r.peers).to.not.include('http://node3:8080'));"
-            ]
+          "name": "0.5 node1 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('hashNode1', r.latestHash);",
+                  "pm.collectionVariables.set('lenNode1', String(r.length));",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);",
+                  "pm.test('hash do último bloco', () => pm.expect(r.latestHash).to.have.lengthOf(64));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain/validate",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Recalcula encadeamento e Proof of Work. Gravamos latestHash para os dois requests seguintes compararem. No genesis: length 1."
+          }
+        },
+        {
+          "name": "0.6 node2 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/chain/validate",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O node2 precisa devolver o mesmo latestHash e o mesmo length do 0.5."
+          }
+        },
+        {
+          "name": "0.7 node3 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/chain/validate",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O node3 fecha o acordo: mesmo hash do node1."
           }
         }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{node1Url}}/peers",
-          "host": ["{{node1Url}}"],
-          "path": ["peers"]
-        },
-        "description": "GET /peers — a lista do node1 sem o node3: a lista de peers e ESTADO do no e mudou com o sistema rodando. Compare com GET /peers do node2 ({{node2Url}}/peers): la o node3 continua — a visao da rede e local a cada no, sem consenso (como a mempool)."
-      }
+      ]
     },
     {
-      "name": "24. Anunciar um no (POST /peers)",
-      "event": [
+      "name": "1. Transação inválida",
+      "description": "A porta fecha antes da mempool. Não há gossip.",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('200 OK (handshake aprovado: respondeu em GET / e tem o mesmo genesis)', () => pm.response.to.have.status(200));",
-              "",
-              "const r = pm.response.json();",
-              "pm.test('boas-vindas: quem respondeu e o genesis dele', () => {",
-              "    pm.expect(r.node).to.be.a('string');",
-              "    pm.expect(r.genesis).to.have.lengthOf(64);",
-              "});",
-              "pm.test('boas-vindas: os peers que ele conhece (e como o no novo descobre a rede)', () => pm.expect(r.peers).to.be.an('array'));",
-              "pm.test('added informa se entrou agora (false = reanuncio)', () => pm.expect(r.added).to.be.a('boolean'));"
-            ]
+          "name": "1.1 node1 — POST /transactions (inválida)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "const erro = pm.response.json();",
+                  "pm.test('explica por que recusou', () => pm.expect(erro.error).to.include('From'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{node1Url}}/transactions",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "description": "From vazio e amount 0. Esperem 400: \"From, To e Amount > 0 são obrigatórios.\" A mempool dos três continua em 0.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"\",\n  \"to\": \"bob\",\n  \"amount\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           }
         }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"url\": \"http://node3:8080\"\n}",
-          "options": {
-            "raw": {
-              "language": "json"
+      ]
+    },
+    {
+      "name": "2. Gossip da mempool",
+      "description": "Um POST no node1. A mempool não é compartilhada: cada nó tem a sua, alimentada pelo repasse. O 201 só volta depois que os peers receberam.",
+      "item": [
+        {
+          "name": "2.1 node1 — POST /transactions (alice → bob)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Location aponta para a mempool', () => pm.expect(pm.response.headers.get('Location')).to.eql('/transactions/pending'));",
+                  "const tx = pm.response.json();",
+                  "pm.test('devolve a transação recebida', () => {",
+                  "    pm.expect(tx.from).to.eql('alice');",
+                  "    pm.expect(tx.to).to.eql('bob');",
+                  "    pm.expect(Number(tx.amount)).to.eql(10);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{node1Url}}/transactions",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "description": "201 Created. O corpo devolve a transação. Dentro desta mesma requisição o node1 faz o gossip para node2 e node3.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"alice\",\n  \"to\": \"bob\",\n  \"amount\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
-        "url": {
-          "raw": "{{node1Url}}/peers",
-          "host": ["{{node1Url}}"],
-          "path": ["peers"]
+        {
+          "name": "2.2 node1 — GET /transactions/pending",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const pendentes = pm.response.json();",
+                  "pm.test('alice → bob está na mempool deste nó', () => {",
+                  "    pm.expect(pendentes.some((t) => t.from === 'alice' && t.to === 'bob')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/transactions/pending",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "transactions",
+                "pending"
+              ]
+            },
+            "description": "A fila local do node1 tem alice → bob."
+          }
         },
-        "description": "POST /peers (etapa 10) — o que um no novo manda ao subir: 'existo, me chame em {url}'. Antes de registrar, o node1 faz o HANDSHAKE: chama GET / no endereco anunciado e confere o genesis. 200 = entrou (ou ja estava: added=false); 409 = genesis/dificuldade diferente ou NODE_ID repetido; 502 = o endereco nao respondeu (troque a url por http://node9:8080 para ver); 400 = url invalida. Recoloca o node3 tirado no request 22."
-      }
+        {
+          "name": "2.3 node2 — GET /transactions/pending",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const pendentes = pm.response.json();",
+                  "pm.test('alice → bob está na mempool deste nó', () => {",
+                  "    pm.expect(pendentes.some((t) => t.from === 'alice' && t.to === 'bob')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/transactions/pending",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "transactions",
+                "pending"
+              ]
+            },
+            "description": "A fila local do node2 tem a mesma transação. Foi repasse, não memória compartilhada."
+          }
+        },
+        {
+          "name": "2.4 node3 — GET /transactions/pending",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const pendentes = pm.response.json();",
+                  "pm.test('alice → bob está na mempool deste nó', () => {",
+                  "    pm.expect(pendentes.some((t) => t.from === 'alice' && t.to === 'bob')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/transactions/pending",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                "transactions",
+                "pending"
+              ]
+            },
+            "description": "A fila local do node3 também. Qualquer um dos três já pode minerar."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Mineração",
+      "description": "O 3.1 demora cerca de 1 segundo (Proof of Work). Esperem a resposta antes de seguir. Os três validate têm de concordar; a mempool do node2 fica vazia.",
+      "item": [
+        {
+          "name": "3.1 node1 — POST /blocks/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const bloco = pm.response.json();",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('Proof of Work: o hash começa com os zeros da dificuldade', () => {",
+                  "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+                  "});",
+                  "pm.test('devolve índice, nonce e a lista de transações', () => {",
+                  "    pm.expect(bloco.index).to.be.a('number');",
+                  "    pm.expect(bloco.nonce).to.be.a('number');",
+                  "    pm.expect(bloco.transactions).to.be.an('array');",
+                  "});",
+                  "pm.test('o bloco carrega alice → bob', () => {",
+                  "    pm.expect(bloco.transactions.some((t) => t.from === 'alice' && t.to === 'bob')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/blocks/mine",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "blocks",
+                "mine"
+              ]
+            },
+            "description": "O bloco nasce no node1 e é empurrado aos peers ainda dentro desta requisição. Leiam index, nonce e o hash começando com 0000. A transação alice → bob está dentro do bloco."
+          }
+        },
+        {
+          "name": "3.2 node1 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('hashNode1', r.latestHash);",
+                  "pm.collectionVariables.set('lenNode1', String(r.length));",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);",
+                  "pm.test('hash do último bloco', () => pm.expect(r.latestHash).to.have.lengthOf(64));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain/validate",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "length 2 e o hash novo. Este valor é a referência dos dois validate seguintes."
+          }
+        },
+        {
+          "name": "3.3 node2 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/chain/validate",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O node2 aceitou o bloco sozinho: mesmo latestHash do node1."
+          }
+        },
+        {
+          "name": "3.4 node3 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/chain/validate",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O node3 também. Três réplicas, um hash."
+          }
+        },
+        {
+          "name": "3.5 node2 — GET /transactions/pending",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('mempool vazia — o bloco podou a fila', () => pm.expect(pm.response.json()).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/transactions/pending",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "transactions",
+                "pending"
+              ]
+            },
+            "description": "Fila vazia. O bloco chegou e podou a mempool local. O node2 recebeu, não minerou."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Queda do node3",
+      "description": "Terminal, antes do 4.1:\n  docker compose stop node3\n\nEnviem 4.1 a 4.5. O 4.1 tem de falhar (conexão recusada) — mostrem o erro.\n\nTerminal, antes do 4.6:\n  docker compose start node3\nEsperem uns 3 segundos, node3 healthy, e sigam até o 4.9.",
+      "item": [
+        {
+          "name": "4.1 node3 — GET /",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('node3 ainda respondeu — rode docker compose stop node3 antes', () => {",
+                  "    throw new Error('o container continua no ar');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Com o container parado, o Postman mostra erro de conexão. É o que a turma deve ver. Se este request responder 200, o stop não aconteceu."
+          }
+        },
+        {
+          "name": "4.2 node1 — POST /blocks/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const bloco = pm.response.json();",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('Proof of Work: o hash começa com os zeros da dificuldade', () => {",
+                  "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+                  "});",
+                  "pm.test('devolve índice, nonce e a lista de transações', () => {",
+                  "    pm.expect(bloco.index).to.be.a('number');",
+                  "    pm.expect(bloco.nonce).to.be.a('number');",
+                  "    pm.expect(bloco.transactions).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/blocks/mine",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "blocks",
+                "mine"
+              ]
+            },
+            "description": "O node1 minera sem esperar o morto. O push ao node3 falha na hora (conexão recusada, não timeout de 2 s)."
+          }
+        },
+        {
+          "name": "4.3 node1 — POST /blocks/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const bloco = pm.response.json();",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('Proof of Work: o hash começa com os zeros da dificuldade', () => {",
+                  "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+                  "});",
+                  "pm.test('devolve índice, nonce e a lista de transações', () => {",
+                  "    pm.expect(bloco.index).to.be.a('number');",
+                  "    pm.expect(bloco.nonce).to.be.a('number');",
+                  "    pm.expect(bloco.transactions).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/blocks/mine",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "blocks",
+                "mine"
+              ]
+            },
+            "description": "Segundo bloco na ausência do node3. node1 e node2 ficam em length 4."
+          }
+        },
+        {
+          "name": "4.4 node1 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('hashNode1', r.latestHash);",
+                  "pm.collectionVariables.set('lenNode1', String(r.length));",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);",
+                  "pm.test('hash do último bloco', () => pm.expect(r.latestHash).to.have.lengthOf(64));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain/validate",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Altura nova. O hash daqui é a referência do 4.5 e, depois do sync, do 4.9."
+          }
+        },
+        {
+          "name": "4.5 node2 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/chain/validate",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O node2 acompanhou por push. Mesmo hash do node1. O node3 ficou de fora."
+          }
+        },
+        {
+          "name": "4.6 node3 — GET /",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const no = pm.response.json();",
+                  "pm.test('voltou só com o genesis', () => pm.expect(no.blocks).to.eql(1));",
+                  "pm.test('cadeia válida', () => pm.expect(no.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Depois do start. blocks 1: voltou ao genesis. Não está corrompido, está velho. Memória volátil."
+          }
+        },
+        {
+          "name": "4.7 node3 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('ainda no genesis', () => pm.expect(r.length).to.eql(1));",
+                  "pm.test('hash diferente da cadeia que seguiu sem ele', () => {",
+                  "    pm.expect(r.latestHash).to.not.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/chain/validate",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "length 1 e um latestHash que não é o do node1. Este é o nó atrasado, antes do pull."
+          }
+        },
+        {
+          "name": "4.8 node3 — POST /sync",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const relatorio = pm.response.json();",
+                  "pm.test('adotou a cadeia de um peer e a cadeia cresceu', () => {",
+                  "    pm.expect(relatorio.adopted).to.be.an('object');",
+                  "    pm.expect(relatorio.adopted.from).to.be.a('string');",
+                  "    pm.expect(relatorio.length).to.be.above(relatorio.previousLength);",
+                  "});",
+                  "pm.test('órfãs devolvidas à mempool: 0', () => {",
+                  "    pm.expect(relatorio.orphansBackToMempool).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/sync",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                "sync"
+              ]
+            },
+            "description": "O próprio node3 puxa a cadeia dos peers e adota a mais longa. Leiam adopted.from, length 4 e orphansBackToMempool 0."
+          }
+        },
+        {
+          "name": "4.9 node3 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/chain/validate",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Agora o mesmo latestHash do 4.4. A recuperação fechou."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Partição",
+      "description": "Terminal, antes do 5.1:\n  docker network disconnect satusblockchain_satus-net node2\n\nCada mine demora cerca de 3 segundos (1 s de PoW + 2 s de timeout do peer mudo). Deixem o Postman esperar. Não é travamento.\n\nTerminal, antes do 5.6:\n  docker network connect satusblockchain_satus-net node2\n\nO 5.6 ainda mostra o node2 defasado. O sync que corrige isso é o passo 7.",
+      "item": [
+        {
+          "name": "5.1 node1 — POST /blocks/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const bloco = pm.response.json();",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('Proof of Work: o hash começa com os zeros da dificuldade', () => {",
+                  "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+                  "});",
+                  "pm.test('devolve índice, nonce e a lista de transações', () => {",
+                  "    pm.expect(bloco.index).to.be.a('number');",
+                  "    pm.expect(bloco.nonce).to.be.a('number');",
+                  "    pm.expect(bloco.transactions).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/blocks/mine",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "blocks",
+                "mine"
+              ]
+            },
+            "description": "O node2 está mudo na rede do Compose, mas a porta do host continua viva. O mine responde 200 depois do timeout."
+          }
+        },
+        {
+          "name": "5.2 node1 — POST /blocks/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const bloco = pm.response.json();",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('Proof of Work: o hash começa com os zeros da dificuldade', () => {",
+                  "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+                  "});",
+                  "pm.test('devolve índice, nonce e a lista de transações', () => {",
+                  "    pm.expect(bloco.index).to.be.a('number');",
+                  "    pm.expect(bloco.nonce).to.be.a('number');",
+                  "    pm.expect(bloco.transactions).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/blocks/mine",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "blocks",
+                "mine"
+              ]
+            },
+            "description": "Segundo bloco do lado da frente. node1 e node3 sobem duas alturas. O node2 não vê nenhum dos dois."
+          }
+        },
+        {
+          "name": "5.3 node1 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('hashNode1', r.latestHash);",
+                  "pm.collectionVariables.set('lenNode1', String(r.length));",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);",
+                  "pm.test('hash do último bloco', () => pm.expect(r.latestHash).to.have.lengthOf(64));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain/validate",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Altura do lado da frente. Referência do 5.4 e do contraste com o 5.5."
+          }
+        },
+        {
+          "name": "5.4 node3 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/chain/validate",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O node3 recebeu os dois blocos por push. Mesmo hash do node1."
+          }
+        },
+        {
+          "name": "5.5 node2 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('a cadeia local continua válida', () => pm.expect(r.valid).to.be.true);",
+                  "pm.test('latestHash diferente do node1 — a partição segurou este nó', () => {",
+                  "    pm.expect(r.latestHash).to.not.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/chain/validate",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Responde, porque localhost:8081 não passou pela rede que foi desligada. latestHash antigo e diferente. Cadeia válida, só velha."
+          }
+        },
+        {
+          "name": "5.6 node2 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('a cadeia local continua válida', () => pm.expect(r.valid).to.be.true);",
+                  "pm.test('latestHash diferente do node1 — a partição segurou este nó', () => {",
+                  "    pm.expect(r.latestHash).to.not.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/chain/validate",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Depois do network connect. Continua defasado: reconectar não reescreve a cadeia. A divergência é o estado natural depois da partição."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Fork",
+      "description": "A rede já foi reconectada no fim do passo 5. A transação nasce no node2, que está atrás, e ele minera sem perguntar ao lado da frente.",
+      "item": [
+        {
+          "name": "6.1 node2 — POST /transactions (carol → dave)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Location aponta para a mempool', () => pm.expect(pm.response.headers.get('Location')).to.eql('/transactions/pending'));",
+                  "const tx = pm.response.json();",
+                  "pm.test('devolve a transação recebida', () => {",
+                  "    pm.expect(tx.from).to.eql('carol');",
+                  "    pm.expect(tx.to).to.eql('dave');",
+                  "    pm.expect(Number(tx.amount)).to.eql(7);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{node2Url}}/transactions",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "description": "201. A transação entra na mempool do node2. O lado da frente não vai minerá-la neste passo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"carol\",\n  \"to\": \"dave\",\n  \"amount\": 7\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "6.2 node2 — POST /blocks/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const bloco = pm.response.json();",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('Proof of Work: o hash começa com os zeros da dificuldade', () => {",
+                  "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+                  "});",
+                  "pm.test('devolve índice, nonce e a lista de transações', () => {",
+                  "    pm.expect(bloco.index).to.be.a('number');",
+                  "    pm.expect(bloco.nonce).to.be.a('number');",
+                  "    pm.expect(bloco.transactions).to.be.an('array');",
+                  "});",
+                  "pm.test('o bloco carrega carol → dave', () => {",
+                  "    pm.expect(bloco.transactions.some((t) => t.from === 'carol' && t.to === 'dave')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/blocks/mine",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "blocks",
+                "mine"
+              ]
+            },
+            "description": "O node2 produz um bloco PoW-válido num índice que o node1 já ocupou. O push leva 409 nos vizinhos. O hash começa com 0000 mesmo assim."
+          }
+        },
+        {
+          "name": "6.3 node1 — GET /chain",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const cadeia = pm.response.json();",
+                  "pm.test('lista de blocos', () => pm.expect(cadeia).to.be.an('array').that.is.not.empty);",
+                  "pm.collectionVariables.set('chainNode1', JSON.stringify(cadeia));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain"
+              ]
+            },
+            "description": "Cadeia do lado da frente. O request grava a lista inteira para o 6.4 comparar índice e hash."
+          }
+        },
+        {
+          "name": "6.4 node2 — GET /chain",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const cadeia = pm.response.json();",
+                  "const frente = JSON.parse(pm.collectionVariables.get('chainNode1'));",
+                  "const ultimo = cadeia[cadeia.length - 1];",
+                  "const noMesmoIndice = frente.find((b) => b.index === ultimo.index);",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('mesmo índice que o node1 já tem, com outro hash', () => {",
+                  "    pm.expect(noMesmoIndice, 'envie o 6.3 antes').to.be.an('object');",
+                  "    pm.expect(ultimo.hash).to.not.eql(noMesmoIndice.hash);",
+                  "    pm.expect(ultimo.hash.startsWith(zeros)).to.be.true;",
+                  "});",
+                  "pm.test('o lado da frente continua estritamente mais longo', () => {",
+                  "    pm.expect(frente.length).to.be.above(cadeia.length);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/chain",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "chain"
+              ]
+            },
+            "description": "Comparem o último bloco daqui com o bloco de mesmo index na cadeia do 6.3: outro hash, os dois com Proof of Work válido. A cadeia do node1 continua mais longa."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Reorg",
+      "description": "O node2 puxa a cadeia mais longa, a transação do bloco descartado volta para a mempool, e o mine seguinte a confirma no topo. Os três validate fecham no mesmo hash.",
+      "item": [
+        {
+          "name": "7.1 node2 — POST /sync",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const relatorio = pm.response.json();",
+                  "pm.test('adotou a cadeia de um peer e a cadeia cresceu', () => {",
+                  "    pm.expect(relatorio.adopted).to.be.an('object');",
+                  "    pm.expect(relatorio.adopted.from).to.be.a('string');",
+                  "    pm.expect(relatorio.length).to.be.above(relatorio.previousLength);",
+                  "});",
+                  "pm.test('órfãs devolvidas à mempool: 1', () => {",
+                  "    pm.expect(relatorio.orphansBackToMempool).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/sync",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "sync"
+              ]
+            },
+            "description": "adopted a partir do node1 (ou node3). orphansBackToMempool 1: a carol → dave do bloco órfão não se perde."
+          }
+        },
+        {
+          "name": "7.2 node2 — GET /transactions/pending",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const pendentes = pm.response.json();",
+                  "pm.test('carol → dave está na mempool deste nó', () => {",
+                  "    pm.expect(pendentes.some((t) => t.from === 'carol' && t.to === 'dave')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/transactions/pending",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "transactions",
+                "pending"
+              ]
+            },
+            "description": "carol → dave está de volta na fila local. É a órfã, pronta para entrar num bloco que estenda a cadeia vencedora."
+          }
+        },
+        {
+          "name": "7.3 node2 — POST /blocks/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const bloco = pm.response.json();",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('Proof of Work: o hash começa com os zeros da dificuldade', () => {",
+                  "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+                  "});",
+                  "pm.test('devolve índice, nonce e a lista de transações', () => {",
+                  "    pm.expect(bloco.index).to.be.a('number');",
+                  "    pm.expect(bloco.nonce).to.be.a('number');",
+                  "    pm.expect(bloco.transactions).to.be.an('array');",
+                  "});",
+                  "pm.test('o bloco carrega carol → dave', () => {",
+                  "    pm.expect(bloco.transactions.some((t) => t.from === 'carol' && t.to === 'dave')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/blocks/mine",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "blocks",
+                "mine"
+              ]
+            },
+            "description": "Este bloco estende a cadeia que o sync acabou de adotar, então os peers aceitam. A carol → dave entra no topo."
+          }
+        },
+        {
+          "name": "7.4 node1 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('hashNode1', r.latestHash);",
+                  "pm.collectionVariables.set('lenNode1', String(r.length));",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);",
+                  "pm.test('hash do último bloco', () => pm.expect(r.latestHash).to.have.lengthOf(64));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain/validate",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O node1 recebeu o bloco do node2. Este hash é o acordo final, e a referência do passo 8."
+          }
+        },
+        {
+          "name": "7.5 node2 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/chain/validate",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O node2, que minerou, está no mesmo hash."
+          }
+        },
+        {
+          "name": "7.6 node3 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node3Url}}/chain/validate",
+              "host": [
+                "{{node3Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O node3 fecha. Três curvas de volta no mesmo lugar."
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Nó novo",
+      "description": "Opcional, se sobrarem uns 2 minutos. Terminal, antes do 8.1:\n  docker run -d --name node4 --network satusblockchain_satus-net -e NODE_ID=node4 -e DIFFICULTY=4 -e PEERS=http://node1:8080,http://node2:8080,http://node3:8080 -e OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 -p 8083:8080 satus-node:local\n\nEsperem uns 3 segundos. Ao sair da aula: docker rm -f node4.\nO Grafana não passa a raspar o node4. A prova é esta API e o trace POST /sync no Jaeger.",
+      "item": [
+        {
+          "name": "8.1 node4 — GET /",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const no = pm.response.json();",
+                  "pm.test('é o node4', () => pm.expect(no.node).to.eql('node4'));",
+                  "pm.test('nasceu no genesis', () => pm.expect(no.blocks).to.eql(1));",
+                  "pm.test('cadeia válida', () => pm.expect(no.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node4Url}}/",
+              "host": [
+                "{{node4Url}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Processo novo, mesma imagem. Nasce no genesis: blocks 1. Não herda a história."
+          }
+        },
+        {
+          "name": "8.2 node4 — POST /sync",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const relatorio = pm.response.json();",
+                  "pm.test('adotou a cadeia de um peer e a cadeia cresceu', () => {",
+                  "    pm.expect(relatorio.adopted).to.be.an('object');",
+                  "    pm.expect(relatorio.adopted.from).to.be.a('string');",
+                  "    pm.expect(relatorio.length).to.be.above(relatorio.previousLength);",
+                  "});",
+                  "pm.test('órfãs devolvidas à mempool: 0', () => {",
+                  "    pm.expect(relatorio.orphansBackToMempool).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node4Url}}/sync",
+              "host": [
+                "{{node4Url}}"
+              ],
+              "path": [
+                "sync"
+              ]
+            },
+            "description": "Ele puxa. adopted, e a length alcança a dos outros. orphansBackToMempool 0: não havia bloco próprio para descartar."
+          }
+        },
+        {
+          "name": "8.3 node4 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('mesmo latestHash do node1 — envie o validate do node1 desta pasta antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node4Url}}/chain/validate",
+              "host": [
+                "{{node4Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Mesmo latestHash do último validate do node1 (7.4). Os antigos não foram reconfigurados: quem aprendeu a história foi o nó novo."
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Membros dinâmicos",
+      "description": "Nós entrando e saindo com o sistema no ar: a lista de peers de cada nó muda em execução. Diferente da pasta 8, o nó novo se anuncia sozinho e já nasce sincronizado.\n\nTerminal, antes do 9.1 (se a pasta 8 foi feita, tirem antes o node4 manual):\n  docker rm -f node4\n  .\\scripts\\add-node.ps1 node4 -HostPort 8083\nEsperem uns 5 segundos: o node4 se anuncia ao node1 (semente), descobre o node2 e o node3 pela resposta e sincroniza a cadeia. Para acompanhar: docker logs node4.\n\nTerminal, antes do 9.11:\n  .\\scripts\\remove-node.ps1 node4\ndocker stop: o node4 se despede e sai das listas na hora. Com -Crash (docker kill), ninguém é avisado: o node4 só sai da lista do node1 depois de 3 chamadas sem resposta (por exemplo, três POST /blocks/mine no node1).",
+      "item": [
+        {
+          "name": "9.1 node1 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('hashNode1', r.latestHash);",
+                  "pm.collectionVariables.set('lenNode1', String(r.length));",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);",
+                  "pm.test('hash do último bloco', () => pm.expect(r.latestHash).to.have.lengthOf(64));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain/validate",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Referência para o 9.2: o latestHash e o length da rede agora."
+          }
+        },
+        {
+          "name": "9.2 node4 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('nasceu sincronizado: mesmo latestHash do node1, sem POST /sync', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node4Url}}/chain/validate",
+              "host": [
+                "{{node4Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Na pasta 8 o node4 nascia no genesis e precisava do POST /sync. Aqui ele sincronizou ao entrar: o push só leva blocos novos, e a história ele puxou sozinho."
+          }
+        },
+        {
+          "name": "9.3 node4 — GET /peers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('anuncia-se como http://node4:8080 (ADVERTISE_URL)', () => pm.expect(r.url).to.eql('http://node4:8080'));",
+                  "pm.test('descobriu a rede a partir de uma semente', () => {",
+                  "    pm.expect(r.peers).to.include.members(['http://node1:8080', 'http://node2:8080', 'http://node3:8080']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node4Url}}/peers",
+              "host": [
+                "{{node4Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "O add-node.ps1 deu ao node4 só uma semente (PEERS=http://node1:8080). O node2 e o node3 vieram na resposta do anúncio ao node1, e o node4 se anunciou a eles também."
+          }
+        },
+        {
+          "name": "9.4 node1 — GET /peers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('o node4 entrou na lista do node1 por anúncio', () => {",
+                  "    pm.expect(r.peers).to.include('http://node4:8080');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/peers",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "O node4 não está no PEERS do node1 (docker-compose.yml). Entrou na lista em execução: o node1 chamou o node4 de volta (GET /), conferiu o genesis e o registrou."
+          }
+        },
+        {
+          "name": "9.5 node4 — POST /blocks/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const bloco = pm.response.json();",
+                  "pm.collectionVariables.set('hashBlocoNode4', bloco.hash);",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('Proof of Work: o hash começa com os zeros da dificuldade', () => {",
+                  "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node4Url}}/blocks/mine",
+              "host": [
+                "{{node4Url}}"
+              ],
+              "path": [
+                "blocks",
+                "mine"
+              ]
+            },
+            "description": "O nó que entrou em execução minera e faz push como qualquer outro. Gravamos o hash para o 9.6."
+          }
+        },
+        {
+          "name": "9.6 node1 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('hashNode1', r.latestHash);",
+                  "pm.collectionVariables.set('lenNode1', String(r.length));",
+                  "pm.test('o bloco minerado no node4 chegou ao node1 — envie o 9.5 antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashBlocoNode4'));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain/validate",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O topo do node1 é o bloco do node4: o push do 9.5 chegou. Quem recebe um bloco também o repassa aos próprios peers, então chega a quem não conhece o node4."
+          }
+        },
+        {
+          "name": "9.7 node1 — DELETE /peers (despedida do node3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (idempotente: 200 mesmo se o peer já não estava na lista)', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('informa se removeu', () => pm.expect(r.removed).to.be.a('boolean'));",
+                  "pm.test('o node3 saiu da lista do node1', () => pm.expect(r.peers).to.not.include('http://node3:8080'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/peers?url=http://node3:8080",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ],
+              "query": [
+                {
+                  "key": "url",
+                  "value": "http://node3:8080"
+                }
+              ]
+            },
+            "description": "A mensagem que um nó manda ao ser desligado com docker stop: me tire da lista. Aqui o node1 tira o node3 só da lista DELE. O 9.9 recoloca."
+          }
+        },
+        {
+          "name": "9.8 node2 — GET /peers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('na lista do node2 o node3 continua: a visão da rede é local a cada nó', () => {",
+                  "    pm.expect(r.peers).to.include('http://node3:8080');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/peers",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "Como a mempool, a lista de peers é estado local, sem consenso. Duas listas diferentes por um tempo não quebram nada: cada nó valida a cadeia por conta própria."
+          }
+        },
+        {
+          "name": "9.9 node1 — POST /peers (anúncio do node3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (handshake aprovado: respondeu em GET / e tem o mesmo genesis)', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('boas-vindas: quem respondeu e o genesis dele', () => {",
+                  "    pm.expect(r.node).to.be.a('string');",
+                  "    pm.expect(r.genesis).to.have.lengthOf(64);",
+                  "});",
+                  "pm.test('boas-vindas: os peers que o node1 conhece', () => pm.expect(r.peers).to.be.an('array'));",
+                  "pm.test('added diz se entrou agora (false = reanúncio)', () => pm.expect(r.added).to.be.a('boolean'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"http://node3:8080\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{node1Url}}/peers",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "O que um nó novo manda ao subir: existo, me chame neste endereço. Antes de registrar, o node1 faz o handshake: chama GET / no endereço e confere o genesis. 200 = entrou (ou já estava: added false); 409 = outro genesis (outra dificuldade) ou NODE_ID repetido; 502 = o endereço não respondeu (troquem por http://node9:8080 para ver); 400 = url inválida."
+          }
+        },
+        {
+          "name": "9.10 node1 — GET /peers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('o node3 voltou e o node4 continua na lista', () => {",
+                  "    pm.expect(r.peers).to.include.members(['http://node3:8080', 'http://node4:8080']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/peers",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "Lista do node1 depois do anúncio. Antes do 9.11: .\\scripts\\remove-node.ps1 node4 no terminal."
+          }
+        },
+        {
+          "name": "9.11 node1 — GET /peers (depois do remove-node)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('o node4 se despediu e saiu da lista — rode o remove-node.ps1 antes', () => {",
+                  "    pm.expect(r.peers).to.not.include('http://node4:8080');",
+                  "});",
+                  "pm.test('as sementes continuam', () => {",
+                  "    pm.expect(r.peers).to.include.members(['http://node2:8080', 'http://node3:8080']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/peers",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "Com remove-node.ps1 (docker stop) o node4 se despediu e sumiu na hora. Com -Crash, este teste só passa depois de 3 chamadas sem resposta ao node4: sementes nunca saem por falha, nós dinâmicos sim."
+          }
+        }
+      ]
     }
   ]
 }
