@@ -4,6 +4,7 @@ import { api } from './api/client';
 import { ActivityLog, type LoggedActivity } from './components/ActivityLog';
 import { ChainExplorer } from './components/ChainExplorer';
 import { Header } from './components/Header';
+import { INITIAL_FORK_PROGRESS, type ForkProgress } from './components/lab/ForkScenario';
 import { Lab } from './components/lab/Lab';
 import { NetworkGraph } from './components/NetworkGraph';
 import { NodePanel } from './components/NodePanel';
@@ -34,6 +35,8 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [comparePreset, setComparePreset] = useState<{ a: string; b: string } | null>(null);
   const [tamperPreset, setTamperPreset] = useState<{ node: string; index: number } | null>(null);
+  // Aqui, e não no laboratório: trocar de aba desmonta a aba, e o roteiro não pode voltar ao passo 1.
+  const [forkProgress, setForkProgress] = useState<ForkProgress>(INITIAL_FORK_PROGRESS);
   const [log, setLog] = useState<LoggedActivity[]>([]);
   const sequence = useRef(0);
 
@@ -120,6 +123,8 @@ export function App() {
             snapshot={snapshot}
             actions={actions}
             tamperPreset={tamperPreset}
+            forkProgress={forkProgress}
+            onForkProgress={setForkProgress}
             onCompare={(a, b) => {
               setComparePreset({ a, b });
               go('explorador');

@@ -1,7 +1,8 @@
+import type { Dispatch, SetStateAction } from 'react';
 import type { NetworkSnapshot } from '../../api/types';
 import { LAB_KEY, type NodeActions } from '../../hooks/useNodeActions';
 import { DelayPanel } from './DelayPanel';
-import { ForkScenario } from './ForkScenario';
+import { type ForkProgress, ForkScenario } from './ForkScenario';
 import { PartitionPanel } from './PartitionPanel';
 import { TamperPanel } from './TamperPanel';
 
@@ -9,6 +10,8 @@ interface Props {
   snapshot: NetworkSnapshot;
   actions: NodeActions;
   tamperPreset: { node: string; index: number } | null;
+  forkProgress: ForkProgress;
+  onForkProgress: Dispatch<SetStateAction<ForkProgress>>;
   onCompare: (a: string, b: string) => void;
 }
 
@@ -17,7 +20,7 @@ interface Props {
  * console continua operando todos, inclusive os dois lados de uma partição. Tudo volta ao
  * normal com "Remover todas as falhas" (ou reiniciando os nós).
  */
-export function Lab({ snapshot, actions, tamperPreset, onCompare }: Props) {
+export function Lab({ snapshot, actions, tamperPreset, forkProgress, onForkProgress, onCompare }: Props) {
   const busy = actions.busy[LAB_KEY];
 
   return (
@@ -37,7 +40,8 @@ export function Lab({ snapshot, actions, tamperPreset, onCompare }: Props) {
 
       <section className="card" aria-labelledby="lab-fork">
         <h3 id="lab-fork">Roteiro: fork e convergência</h3>
-        <ForkScenario snapshot={snapshot} actions={actions} onCompare={onCompare} />
+        <ForkScenario snapshot={snapshot} actions={actions} progress={forkProgress} onProgress={onForkProgress}
+          onCompare={onCompare} />
       </section>
 
       <div className="lab__grid">

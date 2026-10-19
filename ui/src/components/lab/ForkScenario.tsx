@@ -1,12 +1,30 @@
-import { type ReactNode, useState } from 'react';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import type { NetworkSnapshot } from '../../api/types';
 import type { Activity } from '../../domain/messages';
 import { statusInfo } from '../../domain/network';
 import type { NodeActions } from '../../hooks/useNodeActions';
 
+/**
+ * Onde o roteiro está. Mora FORA deste componente (no App): trocar de aba desmonta o
+ * laboratório — inclusive o próprio passo 4, que leva ao explorador — e, ao voltar, o
+ * roteiro tem que continuar de onde parou.
+ */
+export interface ForkProgress {
+  /** Nó escolhido para isolar; null = o padrão (o último nó respondendo). */
+  isolated: string | null;
+  /** Índice do passo atual (0 = nenhum executado). */
+  next: number;
+  /** Um passo está executando — vale também se o operador saiu da aba no meio dele. */
+  working: boolean;
+}
+
+export const INITIAL_FORK_PROGRESS: ForkProgress = { isolated: null, next: 0, working: false };
+
 interface Props {
   snapshot: NetworkSnapshot;
   actions: NodeActions;
+  progress: ForkProgress;
+  onProgress: Dispatch<SetStateAction<ForkProgress>>;
   onCompare: (a: string, b: string) => void;
 }
 
@@ -22,11 +40,11 @@ interface Step {
  * a partição e sincronizar — a convergência pela longest chain rule, com o bloco do lado
  * perdedor virando órfão. Um passo de cada vez, para dar tempo de explicar cada um.
  */
-export function ForkScenario({ snapshot, actions, onCompare }: Props) {
+export function ForkScenario({ snapshot, actions, progress, onProgress, onCompare }: Props) {
   const running = snapshot.nodes.filter((node) => node.state === 'running');
-  const [isolated, setIsolated] = useState(running[running.length - 1]?.id ?? '');
-  const [next, setNext] = useState(0);
-  const [working, setWorking] = useState(false);
+  const { next, working } = progress;
+  // O escolhido saiu do ar (ou nada foi escolhido)? Vale o padrão: o último respondendo.
+  const isolated = running.find((node) => node.id === progress.isolated)?.id ?? running[running.length - 1]?.id ?? '';
 
   const main = running.find((node) => node.id !== isolated)?.id;
 
@@ -87,12 +105,13 @@ export function ForkScenario({ snapshot, actions, onCompare }: Props) {
   ];
 
   async function execute(index: number) {
-    setWorking(true);
+    // Fixa o isolado: um nó que entre no meio do roteiro não pode virar o "último" e trocar de lado.
+    onProgress((current) => ({ ...current, isolated, working: true }));
     try {
       await steps[index].run?.();
-      setNext(index + 1);
+      onProgress((current) => ({ ...current, next: index + 1 }));
     } finally {
-      setWorking(false);
+      onProgress((current) => ({ ...current, working: false }));
     }
   }
 
@@ -104,7 +123,8 @@ export function ForkScenario({ snapshot, actions, onCompare }: Props) {
       <div className="scenario__setup">
         <label>
           Nó a isolar
-          <select value={isolated} onChange={(e) => { setIsolated(e.target.value); setNext(0); }} disabled={working || next > 0}>
+          <select value={isolated} onChange={(e) => onProgress({ ...INITIAL_FORK_PROGRESS, isolated: e.target.value })}
+            disabled={working || next > 0}>
             {running.map((node) => <option key={node.id} value={node.id}>{node.id}</option>)}
           </select>
         </label>
@@ -112,7 +132,8 @@ export function ForkScenario({ snapshot, actions, onCompare }: Props) {
           agora: {isolated} {isolatedInfo ? `${isolatedInfo.symbol} ${isolatedInfo.label}` : '—'} · {main}{' '}
           {mainInfo ? `${mainInfo.symbol} ${mainInfo.label}` : '—'}
         </span>
-        <button type="button" onClick={() => setNext(0)} disabled={working || next === 0}>Recomeçar</button>
+        <button type="button" onClick={() => onProgress((current) => ({ ...current, next: 0 }))}
+          disabled={working || next === 0}>Recomeçar</button>
       </div>
 
       <ol className="steps">
