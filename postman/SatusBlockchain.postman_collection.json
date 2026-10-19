@@ -25,6 +25,10 @@
     {
       "key": "difficulty",
       "value": "4"
+    },
+    {
+      "key": "consoleUrl",
+      "value": "http://localhost:3001"
     }
   ],
   "item": [
@@ -1713,6 +1717,651 @@
               ]
             },
             "description": "Mesmo latestHash do último validate do node1 (7.4). Os antigos não foram reconfigurados: quem aprendeu a história foi o nó novo."
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Membros dinâmicos",
+      "description": "Nós entrando e saindo com o sistema no ar: a lista de peers de cada nó muda em execução. Diferente da pasta 8, o nó novo se anuncia sozinho e já nasce sincronizado.\n\nTerminal, antes do 9.1 (se a pasta 8 foi feita, tirem antes o node4 manual):\n  docker rm -f node4\n  .\\scripts\\add-node.ps1 node4 -HostPort 8083\nEsperem uns 5 segundos: o node4 se anuncia ao node1 (semente), descobre o node2 e o node3 pela resposta e sincroniza a cadeia. Para acompanhar: docker logs node4.\n\nTerminal, antes do 9.11:\n  .\\scripts\\remove-node.ps1 node4\ndocker stop: o node4 se despede e sai das listas na hora. Com -Crash (docker kill), ninguém é avisado: o node4 só sai da lista do node1 depois de 3 chamadas sem resposta (por exemplo, três POST /blocks/mine no node1).",
+      "item": [
+        {
+          "name": "9.1 node1 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('hashNode1', r.latestHash);",
+                  "pm.collectionVariables.set('lenNode1', String(r.length));",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);",
+                  "pm.test('hash do último bloco', () => pm.expect(r.latestHash).to.have.lengthOf(64));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain/validate",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Referência para o 9.2: o latestHash e o length da rede agora."
+          }
+        },
+        {
+          "name": "9.2 node4 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('nasceu sincronizado: mesmo latestHash do node1, sem POST /sync', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashNode1'));",
+                  "});",
+                  "pm.test('mesmo tamanho do node1', () => {",
+                  "    pm.expect(r.length).to.eql(Number(pm.collectionVariables.get('lenNode1')));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node4Url}}/chain/validate",
+              "host": [
+                "{{node4Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "Na pasta 8 o node4 nascia no genesis e precisava do POST /sync. Aqui ele sincronizou ao entrar: o push só leva blocos novos, e a história ele puxou sozinho."
+          }
+        },
+        {
+          "name": "9.3 node4 — GET /peers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('anuncia-se como http://node4:8080 (ADVERTISE_URL)', () => pm.expect(r.url).to.eql('http://node4:8080'));",
+                  "pm.test('descobriu a rede a partir de uma semente', () => {",
+                  "    pm.expect(r.peers).to.include.members(['http://node1:8080', 'http://node2:8080', 'http://node3:8080']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node4Url}}/peers",
+              "host": [
+                "{{node4Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "O add-node.ps1 deu ao node4 só uma semente (PEERS=http://node1:8080). O node2 e o node3 vieram na resposta do anúncio ao node1, e o node4 se anunciou a eles também."
+          }
+        },
+        {
+          "name": "9.4 node1 — GET /peers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('o node4 entrou na lista do node1 por anúncio', () => {",
+                  "    pm.expect(r.peers).to.include('http://node4:8080');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/peers",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "O node4 não está no PEERS do node1 (docker-compose.yml). Entrou na lista em execução: o node1 chamou o node4 de volta (GET /), conferiu o genesis e o registrou."
+          }
+        },
+        {
+          "name": "9.5 node4 — POST /blocks/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const bloco = pm.response.json();",
+                  "pm.collectionVariables.set('hashBlocoNode4', bloco.hash);",
+                  "const zeros = '0'.repeat(Number(pm.collectionVariables.get('difficulty')));",
+                  "pm.test('Proof of Work: o hash começa com os zeros da dificuldade', () => {",
+                  "    pm.expect(bloco.hash.startsWith(zeros)).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{node4Url}}/blocks/mine",
+              "host": [
+                "{{node4Url}}"
+              ],
+              "path": [
+                "blocks",
+                "mine"
+              ]
+            },
+            "description": "O nó que entrou em execução minera e faz push como qualquer outro. Gravamos o hash para o 9.6."
+          }
+        },
+        {
+          "name": "9.6 node1 — GET /chain/validate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('hashNode1', r.latestHash);",
+                  "pm.collectionVariables.set('lenNode1', String(r.length));",
+                  "pm.test('o bloco minerado no node4 chegou ao node1 — envie o 9.5 antes', () => {",
+                  "    pm.expect(r.latestHash).to.eql(pm.collectionVariables.get('hashBlocoNode4'));",
+                  "});",
+                  "pm.test('cadeia válida', () => pm.expect(r.valid).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/chain/validate",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "chain",
+                "validate"
+              ]
+            },
+            "description": "O topo do node1 é o bloco do node4: o push do 9.5 chegou. Quem recebe um bloco também o repassa aos próprios peers, então chega a quem não conhece o node4."
+          }
+        },
+        {
+          "name": "9.7 node1 — DELETE /peers (despedida do node3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (idempotente: 200 mesmo se o peer já não estava na lista)', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('informa se removeu', () => pm.expect(r.removed).to.be.a('boolean'));",
+                  "pm.test('o node3 saiu da lista do node1', () => pm.expect(r.peers).to.not.include('http://node3:8080'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/peers?url=http://node3:8080",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ],
+              "query": [
+                {
+                  "key": "url",
+                  "value": "http://node3:8080"
+                }
+              ]
+            },
+            "description": "A mensagem que um nó manda ao ser desligado com docker stop: me tire da lista. Aqui o node1 tira o node3 só da lista DELE. O 9.9 recoloca."
+          }
+        },
+        {
+          "name": "9.8 node2 — GET /peers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('na lista do node2 o node3 continua: a visão da rede é local a cada nó', () => {",
+                  "    pm.expect(r.peers).to.include('http://node3:8080');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node2Url}}/peers",
+              "host": [
+                "{{node2Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "Como a mempool, a lista de peers é estado local, sem consenso. Duas listas diferentes por um tempo não quebram nada: cada nó valida a cadeia por conta própria."
+          }
+        },
+        {
+          "name": "9.9 node1 — POST /peers (anúncio do node3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (handshake aprovado: respondeu em GET / e tem o mesmo genesis)', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('boas-vindas: quem respondeu e o genesis dele', () => {",
+                  "    pm.expect(r.node).to.be.a('string');",
+                  "    pm.expect(r.genesis).to.have.lengthOf(64);",
+                  "});",
+                  "pm.test('boas-vindas: os peers que o node1 conhece', () => pm.expect(r.peers).to.be.an('array'));",
+                  "pm.test('added diz se entrou agora (false = reanúncio)', () => pm.expect(r.added).to.be.a('boolean'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"http://node3:8080\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{node1Url}}/peers",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "O que um nó novo manda ao subir: existo, me chame neste endereço. Antes de registrar, o node1 faz o handshake: chama GET / no endereço e confere o genesis. 200 = entrou (ou já estava: added false); 409 = outro genesis (outra dificuldade) ou NODE_ID repetido; 502 = o endereço não respondeu (troquem por http://node9:8080 para ver); 400 = url inválida."
+          }
+        },
+        {
+          "name": "9.10 node1 — GET /peers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('o node3 voltou e o node4 continua na lista', () => {",
+                  "    pm.expect(r.peers).to.include.members(['http://node3:8080', 'http://node4:8080']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/peers",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "Lista do node1 depois do anúncio. Antes do 9.11: .\\scripts\\remove-node.ps1 node4 no terminal."
+          }
+        },
+        {
+          "name": "9.11 node1 — GET /peers (depois do remove-node)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('o node4 se despediu e saiu da lista — rode o remove-node.ps1 antes', () => {",
+                  "    pm.expect(r.peers).to.not.include('http://node4:8080');",
+                  "});",
+                  "pm.test('as sementes continuam', () => {",
+                  "    pm.expect(r.peers).to.include.members(['http://node2:8080', 'http://node3:8080']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{node1Url}}/peers",
+              "host": [
+                "{{node1Url}}"
+              ],
+              "path": [
+                "peers"
+              ]
+            },
+            "description": "Com remove-node.ps1 (docker stop) o node4 se despediu e sumiu na hora. Com -Crash, este teste só passa depois de 3 chamadas sem resposta ao node4: sementes nunca saem por falha, nós dinâmicos sim."
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Console web",
+      "description": "Opcional: a API do console web (a tela fica em http://localhost:3001). Terminal, antes do 10.1 (acrescenta o console à stack que já está no ar):\n  docker compose -f docker-compose.yml -f docker-compose.observability.yml -f docker-compose.console.yml up --build -d\n\nO gateway consulta todos os nós e só repassa as operações: o corpo volta como o nó respondeu.\nPara ver o status mudar: docker compose stop node3, o 10.2 duas vezes, docker compose start node3 e o 10.1 — o node3 aparece behind até POST {{consoleUrl}}/api/nodes/node3/sync.",
+      "item": [
+        {
+          "name": "10.1 console — GET /api/network",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (console no ar)', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('resumo da rede', () => {",
+                  "    pm.expect(r.summary.total).to.be.at.least(1);",
+                  "    pm.expect(r.summary.converged).to.be.a('boolean');",
+                  "});",
+                  "pm.test('cada nó tem estado e status em texto', () => {",
+                  "    r.nodes.forEach((n) => {",
+                  "        pm.expect(['running', 'unreachable', 'stopped']).to.include(n.state);",
+                  "        pm.expect(['ok', 'behind', 'diverged', 'invalid', 'incompatible', 'unknown']).to.include(n.status);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/network",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "network"
+              ]
+            },
+            "description": "A rede inteira num pedido: o gateway consulta todos os nós em paralelo e diz, para cada um, se respondeu (state) e como a cadeia dele se compara com a líder (status: ok, behind = atrasado, diverged = fork...). É o que a tela do console pede a cada 2 s."
+          }
+        },
+        {
+          "name": "10.2 console — POST /api/nodes/node2/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 (minerou) ou 409 (a cadeia mudou durante a mineração)', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));",
+                  "if (pm.response.code === 200) {",
+                  "    const bloco = pm.response.json();",
+                  "    pm.test('o corpo é o bloco do nó, intacto (o gateway só repassa)', () => {",
+                  "        pm.expect(bloco.index).to.be.at.least(1);",
+                  "        pm.expect(bloco.hash).to.have.lengthOf(64);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/nodes/node2/mine",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "nodes",
+                "node2",
+                "mine"
+              ]
+            },
+            "description": "O gateway repassa ao POST /blocks/mine do node2 e devolve status e corpo como o nó respondeu. Enviem o 10.1 em seguida: o maxLength cresceu e todos continuam converged. Mesma ideia para /transactions e /sync."
+          }
+        },
+        {
+          "name": "10.3 console — GET /api/capabilities",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('informa se gerencia nós (Docker)', () => pm.expect(r.canManageNodes).to.be.a('boolean'));",
+                  "pm.test('links de observabilidade', () => pm.expect(r.links.grafana).to.match(/^http/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/capabilities",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "capabilities"
+              ]
+            },
+            "description": "runtime docker: o console cria e derruba nós pelo socket do Docker; none: só vê e opera a rede. Com Docker, POST {{consoleUrl}}/api/nodes cria um nó novo (nome, semente e dificuldade escolhidos pelo console) e POST {{consoleUrl}}/api/nodes/{id}/stop?mode=crash simula uma queda."
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Laboratório de falhas",
+      "description": "Fork sem derrubar nada: a partição é simulada nos próprios nós e vale só para o tráfego entre eles. A tela guiada fica no console, aba Laboratório de falhas. Precisa do console da pasta 10.\n\nEntre o 11.1 e o 11.2: minerem uma vez no node3 (POST {{node3Url}}/blocks/mine) e duas no node1 (POST {{node1Url}}/blocks/mine). Cada lado segue por conta própria — um fork: o 10.1 mostra o node3 diverged.\n\nDireto nos nós, sem o console: PUT {{node3Url}}/lab/partition com {\"group\": \"B\"}, PUT .../lab/delay com {\"ms\": 3000} (nó lento: acima de 2 s, os peers o veem como caído) e DELETE .../lab. E POST .../blocks/inspect com um bloco de GET /chain (troquem um amount) mostra o hash recalculado divergindo do declarado.",
+      "item": [
+        {
+          "name": "11.1 console — PUT /api/lab/partition (isolar o node3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('um resultado por nó', () => pm.expect(r).to.be.an('array').that.is.not.empty);",
+                  "pm.test('o node3 foi para o lado B', () => {",
+                  "    const n3 = r.find((x) => x.node === 'node3');",
+                  "    pm.expect(n3.status).to.eql(200);",
+                  "    pm.expect(n3.body.partition).to.eql('B');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groups\": { \"node1\": \"A\", \"node2\": \"A\", \"node3\": \"B\" }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{consoleUrl}}/api/lab/partition",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "lab",
+                "partition"
+              ]
+            },
+            "description": "Partição simulada: nós de lados diferentes recusam o tráfego entre si (503), mas o console e o Postman continuam operando os dois. Para curar só a partição: o mesmo request com groups = {}."
+          }
+        },
+        {
+          "name": "11.2 console — DELETE /api/lab (remover as falhas)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('todos sem partição e sem atraso', () => {",
+                  "    r.forEach((x) => {",
+                  "        pm.expect(x.body.partition).to.eql(null);",
+                  "        pm.expect(x.body.delayMs).to.eql(0);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/lab",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "lab"
+              ]
+            },
+            "description": "Tira a partição e a lentidão de todos os nós. Os forks NÃO se desfazem sozinhos: depois disso, enviem o 11.3 (sincronizar todos)."
+          }
+        },
+        {
+          "name": "11.3 console — POST /api/lab/sync-all (sincronizar todos)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('o relatório do sync de cada nó', () => {",
+                  "    r.forEach((x) => pm.expect(x.body.length).to.be.a('number'));",
+                  "});",
+                  "const adotou = r.filter((x) => x.body && x.body.adopted);",
+                  "if (adotou.length > 0) {",
+                  "    pm.test('quem estava no ramo perdedor adotou a cadeia mais longa', () => pm.expect(adotou[0].body.length).to.be.above(adotou[0].body.previousLength));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/lab/sync-all",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "lab",
+                "sync-all"
+              ]
+            },
+            "description": "POST /sync em cada nó, um de cada vez: depois de curar a partição, é assim que a rede converge pela longest chain rule. O nó do ramo perdedor mostra adopted e orphansBackToMempool (as transações do bloco descartado voltam para a mempool). Durante a partição, nada atravessa: nem o pull."
           }
         }
       ]

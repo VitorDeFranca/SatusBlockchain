@@ -6,7 +6,7 @@ namespace SatusBlockchain.Node.Core;
 ///
 /// Thread-safe por <c>lock</c>: blocos podem chegar de três fontes — mineração local,
 /// propagação de outro nó (etapa 6) e substituição pela cadeia mais longa que um peer
-/// manda no <c>POST /sync</c> (etapa 8).
+/// manda no <c>POST /sync</c> (etapa 8, também disparado quando um nó entra na rede).
 /// </summary>
 public class Blockchain
 {
@@ -27,12 +27,21 @@ public class Blockchain
     /// <summary>Dificuldade do Proof of Work usada por este nó.</summary>
     public byte Difficulty { get; }
 
+    /// <summary>
+    /// Hash do genesis — a "certidão de nascimento" da rede. Nunca muda: nem o reorg troca
+    /// o genesis (<see cref="TryReplaceChain"/> exige o mesmo). Na etapa 10 é o que o
+    /// handshake compara antes de aceitar um nó novo: genesis diferente = outro universo.
+    /// </summary>
+    public string GenesisHash { get; }
+
     public Blockchain(byte difficulty = ProofOfWork.DefaultDifficulty)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThan(difficulty, ProofOfWork.MaxDifficulty);
 
         Difficulty = difficulty;
-        _chain.Add(CreateGenesisBlock(difficulty));
+        var genesis = CreateGenesisBlock(difficulty);
+        GenesisHash = genesis.Hash;
+        _chain.Add(genesis);
     }
 
     public int Length
@@ -96,6 +105,35 @@ public class Blockchain
 
         lock (_lock)
             return TryAppend(candidate) ? candidate : null;
+    }
+
+    /// <summary>
+    /// Explica, SEM anexar, o que <see cref="AddBlock"/> faria com o bloco (etapa 12 —
+    /// explorador e laboratório do console). Usa exatamente as regras de aceitação: hash
+    /// recalculado (adulteração), Proof of Work e encaixe no topo (índice e elo).
+    /// </summary>
+    public BlockInspection Inspect(Block block)
+    {
+        var recalculated = Hasher.ComputeHash(block);
+        var hashMatches = block.Hash == recalculated;
+        var proofOfWork = ProofOfWork.SatisfiesDifficulty(block.Hash, Difficulty);
+
+        lock (_lock)
+        {
+            var inChain = block.Index >= 0 && block.Index < _chain.Count
+                && _chain[(int)block.Index].Hash == block.Hash;
+            var extendsTip = block.Index == _chain.Count && block.PreviousHash == _chain[^1].Hash;
+
+            var verdict =
+                !hashMatches ? "Adulterado: o hash recalculado não bate com o declarado — o conteúdo mudou depois da mineração."
+                : !proofOfWork ? $"Sem Proof of Work válido: o hash não começa com {Difficulty} zeros."
+                : inChain ? $"Íntegro e já presente na cadeia deste nó (posição {block.Index})."
+                : !extendsTip ? "Íntegro, mas não encaixa no topo desta cadeia (índice ou elo): duplicado, órfão ou de outro ramo."
+                : "Íntegro e encaixa no topo: seria aceito.";
+
+            return new BlockInspection(recalculated, hashMatches, proofOfWork, inChain, extendsTip,
+                WouldAccept: hashMatches && proofOfWork && extendsTip, verdict);
+        }
     }
 
     /// <summary>

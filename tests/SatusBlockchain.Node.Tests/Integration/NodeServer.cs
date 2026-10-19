@@ -17,6 +17,7 @@ public sealed class NodeServer : IDisposable
 {
     private readonly Process _process;
     private readonly StringBuilder _output = new();
+    private bool _disposed;
 
     private NodeServer(Process process, HttpClient client, string baseAddress)
     {
@@ -51,12 +52,15 @@ public sealed class NodeServer : IDisposable
     /// porque este é o caminho normal; valores inválidos são testados via
     /// <see cref="CreateStartInfo"/>. <paramref name="peers"/> vem do endereço de outros
     /// nós já subidos (<see cref="BaseAddress"/>) — é assim que a propagação é testada.
+    /// <paramref name="advertise"/> (etapa 10) define ADVERTISE_URL = o próprio endereço:
+    /// o nó se anuncia aos peers ao subir, como um container criado pelo add-node.
     /// </summary>
     public static async Task<NodeServer> StartAsync(string nodeId = "node-test", byte difficulty = 2,
-        IEnumerable<string>? peers = null)
+        IEnumerable<string>? peers = null, bool advertise = false)
     {
         var address = $"http://127.0.0.1:{FreePort()}";
-        var startInfo = CreateStartInfo(address, nodeId, difficulty.ToString(), peers);
+        var startInfo = CreateStartInfo(address, nodeId, difficulty.ToString(), peers,
+            advertiseUrl: advertise ? address : null);
 
         var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Não foi possível iniciar o processo do nó.");
@@ -83,7 +87,7 @@ public sealed class NodeServer : IDisposable
     /// das variáveis de quem o executa.
     /// </summary>
     public static ProcessStartInfo CreateStartInfo(string urls, string nodeId = "node-test",
-        string difficulty = "2", IEnumerable<string>? peers = null)
+        string difficulty = "2", IEnumerable<string>? peers = null, string? advertiseUrl = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -112,6 +116,9 @@ public sealed class NodeServer : IDisposable
         // Definido SEMPRE (mesmo vazio): um PEERS deixado no ambiente de quem executa
         // os testes faria o nó tentar propagar para peers que não existem.
         startInfo.Environment["PEERS"] = peers is null ? string.Empty : string.Join(",", peers);
+        // Mesmo motivo do PEERS: um ADVERTISE_URL herdado faria o nó se anunciar sem o
+        // teste pedir (etapa 10).
+        startInfo.Environment["ADVERTISE_URL"] = advertiseUrl ?? string.Empty;
         // Sem Jaeger nos testes: REMOVE o endpoint OTLP herdado do ambiente de quem
         // executa (mesma razão do PEERS) — nenhum teste pode tentar exportar trace
         // para fora. Cobre a decisão "OTLP condicional" da etapa 9.
@@ -169,8 +176,16 @@ public sealed class NodeServer : IDisposable
         return port;
     }
 
+    /// <summary>
+    /// Mata o processo — é uma QUEDA, não um desligamento gracioso (sem despedida). Idempotente:
+    /// o teste de detecção de falha mata o nó no meio e o <c>using</c> chama de novo no fim.
+    /// </summary>
     public void Dispose()
     {
+        if (_disposed)
+            return;
+
+        _disposed = true;
         Client.Dispose();
 
         if (!_process.HasExited)

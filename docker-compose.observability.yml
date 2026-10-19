@@ -6,7 +6,8 @@
 # 3 nós exatamente como nas etapas 5–8. Aqui só se ACRESCENTA:
 #   - OTEL_EXPORTER_OTLP_ENDPOINT nos 3 nós → habilita o export de TRACES (push OTLP);
 #   - Jaeger    → traces, UI em http://localhost:16686;
-#   - Prometheus → raspa GET /metrics dos 3 nós, UI em http://localhost:9090;
+#   - Prometheus → raspa GET /metrics dos nós (descobertos pelo Docker: inclui os que
+#                  entram em execução, etapa 10), UI em http://localhost:9090;
 #   - Grafana   → dashboard, http://localhost:3000 (anônimo, só leitura).
 #
 # Métricas NÃO vão para o Jaeger: topologia clássica — Jaeger guarda traces,
@@ -47,14 +48,19 @@ services:
     restart: unless-stopped
 
   prometheus:
-    # Raspa os 3 nós a cada 5s (config em observability/prometheus.yml).
+    # Raspa os nós a cada 5s (config em observability/prometheus.yml).
     # É o lado PULL da observabilidade: os nós não sabem que o Prometheus existe.
+    # Etapa 10: os alvos vêm da descoberta pelo Docker (nós entram e saem em execução),
+    # daí o socket montado — o mesmo que o Alloy usa. `user: root` porque o usuário
+    # padrão da imagem (nobody) não tem permissão de ler o socket do Docker.
     image: prom/prometheus:v3.15.0
     container_name: prometheus
+    user: root
     ports:
       - "9090:9090"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - satus-net
     restart: unless-stopped

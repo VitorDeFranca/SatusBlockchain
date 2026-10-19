@@ -30,9 +30,11 @@ aberta, substitua por esta. O id é o mesmo.
 | `node3Url` | `http://localhost:8082` | node3 |
 | `node4Url` | `http://localhost:8083` | node4, só no passo 8 |
 | `difficulty` | `4` | zeros exigidos no hash (`0000`) |
+| `consoleUrl` | `http://localhost:3001` | console web, só nas pastas 10 e 11 |
 
 Não usem o **Collection Runner**. As pastas 4, 5 e 8 param no meio para um
-comando de terminal, e o Runner não espera.
+comando de terminal (e a 11, para minerar dos dois lados da partição), e o
+Runner não espera.
 
 Enviem de cima para baixo. O teste verde confirma o campo que a narrativa
 cita (mesmo `latestHash`, 400, 201, órfã de volta na mempool). Vermelho quase
@@ -52,6 +54,8 @@ foi pulado.
 | **6. Fork** | `6.1` … `6.4` | — O `6.4` compara com a cadeia gravada pelo `6.3`. |
 | **7. Reorg** | `7.1` … `7.6` | — |
 | **8. Nó novo** | `8.1` … `8.3` | Antes: o `docker run` do roteiro. Ao sair: `docker rm -f node4`. |
+| **10. Console web** | `10.1` … `10.3` | Antes: `docker compose -f docker-compose.yml -f docker-compose.observability.yml -f docker-compose.console.yml up --build -d`. A tela fica em `http://localhost:3001`. |
+| **11. Laboratório de falhas** | `11.1`, depois `11.2` e `11.3` | — Entre o `11.1` e o `11.2`: minerar uma vez no node3 e duas no node1. O `10.1` mostra o node3 `diverged`. |
 
 Grafana, Jaeger e Loki ficam no navegador, não nesta collection. O Explore
 do Loki só aparece depois do login **admin** / **admin**.

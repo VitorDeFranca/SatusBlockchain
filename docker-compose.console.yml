@@ -1,0 +1,40 @@
+# Etapa 11: console web — OVERLAY do docker-compose.yml base (como o de observabilidade).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.console.yml up --build -d
+#   → abra http://localhost:3001
+#
+# Junto com a observabilidade (os links do cabeçalho passam a funcionar):
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml -f docker-compose.console.yml up --build -d
+#
+# O console monta o socket do Docker para criar, parar e remover nós — o que, na prática,
+# dá a ele poder de root na máquina. Por isso:
+#   - a porta é publicada só em 127.0.0.1 (ninguém da rede alcança o console);
+#   - o gateway só age sobre containers nodeN com a label deste projeto;
+#   - nenhuma imagem, comando ou volume vem da requisição: o nó novo copia imagem e rede de
+#     um nó que já existe (o mesmo molde node-extra do add-node.ps1).
+# Sem este arquivo, nada disso sobe: `docker compose up` continua sendo os 3 nós de sempre.
+
+name: satusblockchain
+
+services:
+  console:
+    build:
+      context: .
+      dockerfile: src/SatusBlockchain.Gateway/Dockerfile
+    image: satus-console:local
+    container_name: console
+    environment:
+      RUNTIME: docker
+      # Links do cabeçalho: endereços vistos do NAVEGADOR (host), não da rede interna.
+      GRAFANA_URL: http://localhost:3000
+      JAEGER_URL: http://localhost:16686
+      PROMETHEUS_URL: http://localhost:9090
+    ports:
+      - "127.0.0.1:3001:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - node1
+    networks:
+      - satus-net
+    restart: unless-stopped

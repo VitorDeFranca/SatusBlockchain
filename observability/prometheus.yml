@@ -1,6 +1,6 @@
-# Os 3 nós publicam GET /metrics na porta 8080 — a INTERNA do container (do host elas
-# aparecem como 8080/8081/8082, mas o Prometheus roda na mesma rede e resolve os nós
-# pelo nome do serviço, todos escutando em 8080 lá dentro).
+# Os nós publicam GET /metrics na porta 8080 — a INTERNA do container (do host elas
+# aparecem como 8080/8081/8082, mas o Prometheus roda na mesma rede e fala com cada
+# container direto, todos escutando em 8080 lá dentro).
 #
 # 5s de intervalo: fino o bastante para acompanhar a demonstração de propagação
 # (um bloco por segundo na dificuldade 4) sem sufocar o nó raspado.
@@ -9,12 +9,37 @@ global:
   evaluation_interval: 5s
 
 scrape_configs:
+  # Etapa 10: os alvos não são mais uma lista fixa (node1..node3). A descoberta pergunta
+  # ao Docker, a cada 5s, quais containers deste projeto existem AGORA — um node4 criado
+  # pelo add-node passa a ser raspado sozinho, e um nó removido sai da lista de alvos.
+  # (Mesmo mecanismo que o Alloy já usa para os logs; por isso o socket do Docker é
+  # montado no container do Prometheus, no docker-compose.observability.yml.)
   - job_name: satus-nodes
     metrics_path: /metrics
-    static_configs:
-      - targets: ["node1:8080", "node2:8080", "node3:8080"]
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=satusblockchain"]
+    relabel_configs:
+      # Só os nós (node1..node3 e os criados a partir do molde node-extra) — Jaeger,
+      # Grafana, Loki e companhia também são deste projeto, mas não têm /metrics de nó.
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        regex: node.*
+        action: keep
+      # A descoberta gera um alvo por porta exposta: fica a 8080, a do /metrics.
+      - source_labels: [__meta_docker_port_private]
+        regex: "8080"
+        action: keep
+      # instance = "node4:8080" (nome do container) em vez do IP: é o que os painéis do
+      # Grafana mostram na legenda, igual aos alvos fixos de antes.
+      - source_labels: [__meta_docker_container_name]
+        regex: /(.*)
+        target_label: instance
+        replacement: $1:8080
 
-  # O próprio Prometheus também se raspá (métrica de auto-saúde: targets UP).
+  # O próprio Prometheus também se raspa (métrica de auto-saúde: targets UP).
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]

@@ -69,4 +69,41 @@ public class NodeOptionsTests
         Assert.Contains("PEERS inválida", excecao.Message);
     }
 
+    [Fact]
+    public void ParseAdvertiseUrl_NaoInformado_NoSemAnuncio()
+    {
+        // Sem ADVERTISE_URL o nó fica como nas etapas 6–9: não se anuncia nem se despede.
+        Assert.Null(NodeOptions.ParseAdvertiseUrl(null));
+        Assert.Null(NodeOptions.ParseAdvertiseUrl("  "));
+    }
+
+    [Fact]
+    public void ParseAdvertiseUrl_NormalizaComoOsPeers()
+    {
+        // Mesma regra do PEERS: é por este texto que os outros nós vão reconhecer este.
+        Assert.Equal("http://node4:8080", NodeOptions.ParseAdvertiseUrl(" http://node4:8080/ "));
+    }
+
+    [Theory]
+    [InlineData("node4:8080")]
+    [InlineData("ftp://node4:8080")]
+    public void ParseAdvertiseUrl_ValorInvalido_FalhaComMensagemClara(string valor)
+    {
+        var excecao = Assert.Throws<InvalidOperationException>(() => NodeOptions.ParseAdvertiseUrl(valor));
+        Assert.Contains("ADVERTISE_URL inválida", excecao.Message);
+    }
+
+    [Theory]
+    [InlineData("http://node4:8080/", true, "http://node4:8080")]
+    [InlineData("  https://node4  ", true, "https://node4")]
+    [InlineData("node4:8080", false, null)]
+    [InlineData("", false, null)]
+    [InlineData(null, false, null)]
+    public void TryNormalizeUrl_RegraUnicaDeEnderecoDeNo(string? valor, bool valido, string? esperado)
+    {
+        // A mesma regra vale para PEERS, ADVERTISE_URL e o corpo de POST /peers.
+        Assert.Equal(valido, NodeOptions.TryNormalizeUrl(valor, out var url));
+        if (valido)
+            Assert.Equal(esperado, url);
+    }
 }

@@ -147,6 +147,37 @@ public class TransactionPropagationTests
         Assert.Single(Elements(peerPending.RootElement));
     }
 
+    [Fact]
+    public async Task Transacao_AtravessaDoisSaltos_PelaRepropagacao()
+    {
+        // Etapa 10: topologia em linha A → B → C. O A não conhece o C; o B, ao ACEITAR a
+        // transação na mempool dele, repassa — e o C pode minerá-la.
+        using var nodeC = await NodeServer.StartAsync(nodeId: "node-c", difficulty: 2);
+        using var nodeB = await NodeServer.StartAsync(nodeId: "node-b", difficulty: 2,
+            peers: [nodeC.BaseAddress]);
+        using var nodeA = await NodeServer.StartAsync(nodeId: "node-a", difficulty: 2,
+            peers: [nodeB.BaseAddress]);
+
+        var response = await PostTransactionAsync(nodeA, new Transaction("alice", "bob", 10m));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        // O repasse do B não é aguardado por ninguém: o C recebe logo em seguida.
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        List<JsonElement> pendentes = [];
+        while (DateTime.UtcNow < deadline)
+        {
+            using var pending = await GetJsonAsync(nodeC, "/transactions/pending");
+            pendentes = [.. Elements(pending.RootElement).Select(element => element.Clone())];
+            if (pendentes.Count > 0)
+                break;
+
+            await Task.Delay(100);
+        }
+
+        var transacao = Assert.Single(pendentes);
+        Assert.Equal("alice", transacao.GetProperty("from").GetString());
+    }
+
     private static Task<HttpResponseMessage> PostTransactionAsync(NodeServer node, Transaction transaction) =>
         node.Client.PostAsync("/transactions", new StringContent(
             JsonSerializer.Serialize(transaction, WebJson), Encoding.UTF8, "application/json"));

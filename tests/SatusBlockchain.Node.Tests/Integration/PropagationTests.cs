@@ -180,6 +180,63 @@ public class PropagationTests
         Assert.Empty(pending.RootElement.EnumerateArray());
     }
 
+    [Fact]
+    public async Task Bloco_AtravessaDoisSaltos_PelaRepropagacao()
+    {
+        // Etapa 10: com nós entrando e saindo, nem todo nó conhece todos. Topologia em
+        // linha A → B → C: o A não conhece o C, mas o B, ao ACEITAR o bloco, repassa.
+        using var nodeC = await NodeServer.StartAsync(nodeId: "node-c", difficulty: 2);
+        using var nodeB = await NodeServer.StartAsync(nodeId: "node-b", difficulty: 2,
+            peers: [nodeC.BaseAddress]);
+        using var nodeA = await NodeServer.StartAsync(nodeId: "node-a", difficulty: 2,
+            peers: [nodeB.BaseAddress]);
+
+        var minedHash = await MinedHashAsync(nodeA);
+
+        // O push do A é aguardado (o B já tem o bloco quando o mine responde); o repasse do
+        // B segue sem bloquear ninguém, então o C recebe logo em seguida — daí a espera.
+        await WaitUntilAsync(async () =>
+        {
+            using var chainC = await GetJsonAsync(nodeC, "/chain");
+            return chainC.RootElement.GetArrayLength() == 2
+                && chainC.RootElement[1].GetProperty("hash").GetString() == minedHash;
+        }, "o bloco não atravessou o segundo salto (B → C)");
+    }
+
+    [Fact]
+    public async Task Bloco_EmTopologiaComCiclo_NaoViraLaco()
+    {
+        // A conhece B e B conhece A: o bloco volta ao A pela re-propagação do B — e para
+        // ali, porque o A já tem o bloco (409) e só o que é ACEITO segue adiante.
+        using var nodeA = await NodeServer.StartAsync(nodeId: "node-a", difficulty: 2);
+        using var nodeB = await NodeServer.StartAsync(nodeId: "node-b", difficulty: 2);
+        await RegisterPeerAsync(nodeA, nodeB);
+        await RegisterPeerAsync(nodeB, nodeA);
+
+        var minedHash = await MinedHashAsync(nodeA);
+
+        foreach (var node in new[] { nodeA, nodeB })
+        {
+            using var chain = await GetJsonAsync(node, "/chain");
+            Assert.Equal(2, chain.RootElement.GetArrayLength());
+            Assert.Equal(minedHash, chain.RootElement[1].GetProperty("hash").GetString());
+        }
+    }
+
+    private static async Task<string> MinedHashAsync(NodeServer node)
+    {
+        using var block = JsonDocument.Parse(await MineBlockJsonAsync(node));
+        return block.RootElement.GetProperty("hash").GetString()!;
+    }
+
+    /// <summary>Liga dois nós já em execução pelo POST /peers (etapa 10), com handshake.</summary>
+    private static async Task RegisterPeerAsync(NodeServer node, NodeServer peer)
+    {
+        var response = await node.Client.PostAsync("/peers", new StringContent(
+            JsonSerializer.Serialize(new { url = peer.BaseAddress }, WebJson), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     private static async Task<string> MineBlockJsonAsync(NodeServer node)
     {
         var response = await node.Client.PostAsync("/blocks/mine", content: null);
@@ -206,4 +263,20 @@ public class PropagationTests
 
     private static List<string> Strings(JsonElement array) =>
         [.. array.EnumerateArray().Select(element => element.GetString()!)];
+
+    /// <summary>Espera o repasse de um salto adiante (etapa 10), que não é aguardado.</summary>
+    private static async Task WaitUntilAsync(Func<Task<bool>> condition, string failure)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await condition())
+                return;
+
+            await Task.Delay(100);
+        }
+
+        Assert.Fail(failure);
+    }
 }

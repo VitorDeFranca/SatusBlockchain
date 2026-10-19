@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using SatusBlockchain.Node.Core;
+using SatusBlockchain.Node.Networking;
 
 namespace SatusBlockchain.Node.Observability;
 
@@ -37,10 +38,11 @@ public class NodeTelemetry
     private readonly Counter<long> _blocksReceived;
     private readonly Counter<long> _peerPushes;
     private readonly Counter<long> _peerPulls;
+    private readonly Counter<long> _peerMembership;
     private readonly Counter<long> _syncs;
     private readonly Counter<long> _txsReceived;
 
-    public NodeTelemetry(Blockchain blockchain, Mempool mempool)
+    public NodeTelemetry(Blockchain blockchain, Mempool mempool, PeerRegistry peers)
     {
         // ---- Counters (acumulam ao longo da vida do processo) ----
 
@@ -61,6 +63,11 @@ public class NodeTelemetry
             description: "Leituras de cadeia de peers no POST /sync " +
                          "(outcome = read | unreachable | invalid).");
 
+        _peerMembership = _meter.CreateCounter<long>(
+            "satus.peer.membership",
+            description: "Mudanças na lista de peers (etapa 10) " +
+                         "(change = added | removed | evicted).");
+
         _syncs = _meter.CreateCounter<long>(
             "satus.sync",
             description: "Execuções de POST /sync (outcome = adopted | kept).");
@@ -78,6 +85,10 @@ public class NodeTelemetry
         _meter.CreateObservableGauge(
             "satus.mempool.size", () => mempool.Count,
             description: "Transações pendentes na mempool local.");
+
+        _meter.CreateObservableGauge(
+            "satus.peers.count", () => peers.Count,
+            description: "Peers na lista local deste nó (etapa 10: muda durante a execução).");
     }
 
     /// <summary>POST /blocks/mine concluiu com sucesso.</summary>
@@ -96,6 +107,14 @@ public class NodeTelemetry
     /// <summary>Leitura da cadeia de um peer dentro do POST /sync.</summary>
     public void PeerPull(string outcome) =>
         _peerPulls.Add(1, Tag("outcome", outcome));
+
+    /// <summary>
+    /// A lista de peers mudou (etapa 10): <c>added</c> (anúncio/descoberta), <c>removed</c>
+    /// (despedida ou handshake incompatível) ou <c>evicted</c> (parou de responder).
+    /// Nunca a URL do peer como tag — cada endereço viraria uma série nova.
+    /// </summary>
+    public void PeerMembership(string change) =>
+        _peerMembership.Add(1, Tag("change", change));
 
     /// <summary>POST /sync terminou: adopted (trocou de cadeia) ou kept (local era a mais longa).</summary>
     public void Sync(string outcome) =>
