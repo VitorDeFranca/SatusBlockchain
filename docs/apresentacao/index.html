@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SatusBlockchain — apresentação</title>
+  <style>
+    :root {
+      --bg: #101418;
+      --surface: #1a2128;
+      --line: #2c3640;
+      --text: #eef2f5;
+      --muted: #8e9aa6;
+      --gold: #c4a35a;
+      --ok: #6f9e7a;
+      --warn: #c4924a;
+      --bad: #c46b6b;
+      --pad: clamp(2.4rem, 6vw, 5.5rem);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: var(--bg); color: var(--text);
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif; }
+    body { overflow: hidden; }
+
+    #deck { height: 100%; position: relative; }
+    .slide {
+      display: none; height: 100%; padding: var(--pad);
+      flex-direction: column; justify-content: center; gap: 1.4rem;
+    }
+    .slide.on { display: flex; }
+    .slide.center { align-items: center; text-align: center; }
+
+    .kicker { color: var(--gold); font-size: 0.92rem; letter-spacing: 0.16em;
+      text-transform: uppercase; font-weight: 600; }
+    h1 { font-size: clamp(2.4rem, 5.2vw, 4.1rem); font-weight: 650; line-height: 1.12;
+      letter-spacing: -0.03em; max-width: 18ch; }
+    h2 { font-size: clamp(1.9rem, 3.6vw, 2.8rem); font-weight: 650; line-height: 1.15;
+      letter-spacing: -0.02em; max-width: 22ch; }
+    .lead { font-size: clamp(1.2rem, 2vw, 1.55rem); color: var(--muted);
+      line-height: 1.45; max-width: 42ch; }
+    p, li { font-size: clamp(1.15rem, 1.7vw, 1.4rem); line-height: 1.45; }
+    .muted { color: var(--muted); }
+
+    ul.clean { list-style: none; display: grid; gap: 0.7rem; max-width: 48rem; }
+    ul.clean li { padding-left: 1.1rem; position: relative; }
+    ul.clean li::before { content: ""; position: absolute; left: 0; top: 0.62em;
+      width: 0.45rem; height: 0.45rem; background: var(--gold); }
+
+    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+      gap: 1rem; width: 100%; max-width: 64rem; }
+    .card { background: var(--surface); border: 1px solid var(--line); padding: 1.15rem 1.25rem; }
+    .card strong { display: block; color: var(--gold); font-size: 0.95rem;
+      letter-spacing: 0.04em; margin-bottom: 0.4rem; }
+    .card span { color: var(--muted); font-size: 1.05rem; line-height: 1.4; }
+
+    .chain { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
+    .blk { background: var(--surface); border: 1px solid var(--line); padding: 0.85rem 1rem;
+      min-width: 10.5rem; font-size: 0.95rem; line-height: 1.4; }
+    .blk b { display: block; color: var(--gold); margin-bottom: 0.25rem; }
+    .blk .h { font-family: Consolas, "Courier New", monospace; color: var(--muted); font-size: 0.85rem; }
+    .arrow { color: var(--gold); padding: 0 0.55rem; font-size: 1.4rem; }
+
+    table { border-collapse: collapse; width: 100%; max-width: 64rem; font-size: 1.08rem; }
+    th, td { text-align: left; padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--line);
+      vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 0.86rem;
+      letter-spacing: 0.06em; text-transform: uppercase; }
+    .tag { display: inline-block; font-size: 0.78rem; letter-spacing: 0.06em;
+      text-transform: uppercase; font-weight: 700; padding: 0.12rem 0.45rem; }
+    .tag.ok { color: var(--ok); background: #1c2a20; }
+    .tag.warn { color: var(--warn); background: #2a2216; }
+    .tag.bad { color: var(--bad); background: #2a1c1c; }
+
+    .flow { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; }
+    .pill { background: var(--surface); border: 1px solid var(--line);
+      padding: 0.55rem 0.85rem; font-size: 1.05rem; }
+    .pill em { color: var(--gold); font-style: normal; }
+
+    #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 3px; background: var(--line); }
+    #bar > i { display: block; height: 100%; background: var(--gold); width: 0; }
+    #hud { position: fixed; right: 1.2rem; bottom: 0.7rem; color: var(--muted);
+      font-size: 0.85rem; letter-spacing: 0.04em; }
+
+    #notes {
+      display: none; position: fixed; left: 0; right: 0; bottom: 0;
+      max-height: 34%; overflow: auto; background: #0b0e11;
+      border-top: 1px solid var(--line); padding: 1rem 1.4rem 2rem;
+      color: #c5ced6; font-size: 1rem; line-height: 1.45;
+    }
+    #notes.on { display: block; }
+    #notes b { color: var(--gold); }
+
+    #help {
+      display: none; position: fixed; inset: 0; background: rgba(8,10,12,0.84);
+      align-items: center; justify-content: center; z-index: 5;
+    }
+    #help.on { display: flex; }
+    #help .box { background: var(--surface); border: 1px solid var(--line);
+      padding: 1.6rem 1.8rem; max-width: 28rem; }
+    #help h3 { margin-bottom: 0.8rem; }
+    #help p { color: var(--muted); font-size: 1.05rem; margin: 0.35rem 0; }
+    kbd { font-family: Consolas, monospace; color: var(--gold); }
+
+    .tiny { font-size: 0.95rem; color: var(--muted); max-width: 50rem; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; width: 100%;
+      max-width: 64rem; align-items: start; }
+    @media (max-width: 800px) { .split { grid-template-columns: 1fr; } }
+
+    @media print {
+      body { overflow: visible; background: #fff; color: #111; }
+      .slide { display: flex; page-break-after: always; height: auto; min-height: 100vh; }
+      #bar, #hud, #notes, #help { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="deck">
+
+    <section class="slide center on">
+      <p class="kicker">Tema 8 · Sistemas Distribuídos</p>
+      <h1>SatusBlockchain</h1>
+      <p class="lead">Blockchain didática peer-to-peer, com observabilidade.</p>
+      <p class="muted">Vitor e Gabriel Raposo</p>
+      <aside>Abram dizendo o problema, não o stack. “Três computadores precisam concordar sobre o mesmo histórico — sem chefe.”</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">O problema</p>
+      <h2>Como vários nós concordam sobre o histórico se não existe servidor central?</h2>
+      <ul class="clean">
+        <li>Nós caem e voltam sem o passado.</li>
+        <li>Mensagens atrasam ou se perdem.</li>
+        <li>A rede pode se partir em dois grupos.</li>
+        <li>Qualquer um pode tentar reescrever o que já foi aceito.</li>
+      </ul>
+      <aside>Esta é a pergunta da disciplina. Blockchain é o mecanismo; o objeto é consenso sob falha.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">O que isto não é</p>
+      <h2>Não é uma criptomoeda.</h2>
+      <p class="lead">É um instrumento para ver replicação, consenso, consistência eventual e tolerância a falhas — com três nós reais, não um slide.</p>
+      <aside>Desarma “e a carteira? e o saldo?”. Fora de escopo de propósito. O código precisa ser explicável no quadro.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Roteiro</p>
+      <div class="row">
+        <div class="card"><strong>01</strong><span>Seis ideias de blockchain, na ordem do código.</span></div>
+        <div class="card"><strong>02</strong><span>Três nós idênticos, HTTP/JSON, sem broker.</span></div>
+        <div class="card"><strong>03</strong><span>Gossip, forks, reorg, convergência.</span></div>
+        <div class="card"><strong>04</strong><span>Jaeger, Grafana — e três roteiros de falha.</span></div>
+      </div>
+      <aside>15 minutos de conceito, 8 a 10 de demo. Se o tempo apertar, pulam métricas e vão direto à partição.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">1 · Hash</p>
+      <h2>SHA-256 é a impressão digital do bloco.</h2>
+      <ul class="clean">
+        <li>Mesmo conteúdo → mesmo hash. Qualquer nó recalcula e confere.</li>
+        <li>Muda um caractere → o hash inteiro muda (avalanche).</li>
+        <li>Não tem função inversa. Não se “desfaz” um hash.</li>
+      </ul>
+      <p class="tiny">No projeto, o hash é sobre JSON com campos em ordem fixa. Sem isso, dois nós serializariam o mesmo bloco de jeitos diferentes e discordariam sem motivo.</p>
+      <aside>Classe Hasher. Serialização canônica é o detalhe que evita “o código está certo e os nós brigam”.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">2 · Encadeamento</p>
+      <div class="chain">
+        <div class="blk"><b>Bloco 0 · genesis</b>hash a1b2…<div class="h">prev 00…00</div></div>
+        <span class="arrow">←</span>
+        <div class="blk"><b>Bloco 1</b>hash c3d4…<div class="h">prev a1b2…</div></div>
+        <span class="arrow">←</span>
+        <div class="blk"><b>Bloco 2</b>hash e5f6…<div class="h">prev c3d4…</div></div>
+      </div>
+      <p class="lead">Alterar o bloco 1 muda o hash dele. O bloco 2 continua apontando para o valor antigo. O elo quebra.</p>
+      <p class="tiny">A cadeia é tamper-evident: não impede a fraude, detecta a fraude. É o que IsValid() faz.</p>
+      <aside>Desenhem no ar: mexeu no passado, o presente deixa de encaixar. Para “consertar”, o atacante reescreve todos os blocos seguintes.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">3 · Genesis</p>
+      <h2>Todo mundo começa no mesmo bloco 0.</h2>
+      <ul class="clean">
+        <li>Criado no construtor da Blockchain, em memória.</li>
+        <li>Timestamp fixo + mesma dificuldade → mesmo hash nos três nós.</li>
+        <li>Dificuldade diferente gera outro genesis: outro universo. O peer recusa tudo.</li>
+      </ul>
+      <aside>Por isso o compose usa a mesma NODE_DIFFICULTY nos três. Já quebramos isso uma vez no desenvolvimento.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">4 · Transação e mempool</p>
+      <div class="flow">
+        <div class="pill">POST /transactions</div>
+        <span class="arrow">→</span>
+        <div class="pill">mempool <em>local</em></div>
+        <span class="arrow">→</span>
+        <div class="pill">POST /blocks/mine</div>
+        <span class="arrow">→</span>
+        <div class="pill">cadeia</div>
+      </div>
+      <ul class="clean">
+        <li>Formato: <em>from, to, amount</em> — sem assinatura, sem saldo.</li>
+        <li>Inválida (vazio ou amount ≤ 0) → 400, não entra.</li>
+        <li>Válida espera na fila. A cadeia só cresce quando alguém minera.</li>
+      </ul>
+      <aside>Pergunta clássica: “a mempool é compartilhada?” Não. Cada nó tem a sua. O que existe é gossip.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">5 · Proof of Work</p>
+      <h2>Ache um nonce cujo hash comece com N zeros.</h2>
+      <p class="tiny" style="font-family:Consolas,monospace">nonce 0 → 8a3f… &nbsp; nonce 1 → 1b92… &nbsp; … &nbsp; nonce 70212 → 0000c7… ✓</p>
+      <ul class="clean">
+        <li>Não há atalho: tenta 0, 1, 2… até o prefixo fechar.</li>
+        <li>Minerar é caro. Verificar é um único SHA-256.</li>
+        <li>Dificuldade 4 ≈ 65 mil tentativas ≈ 1 segundo — tempo para ver a rede.</li>
+      </ul>
+      <aside>Mineração sob demanda, não em background. Sem isso, provocar fork em sala vira loteria.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">6 · Do nó à rede</p>
+      <h2>Até aqui, um computador basta. A disciplina começa com três cópias.</h2>
+      <p class="lead">Cada nó guarda a cadeia inteira. Não existe cópia oficial. O acordo é uma regra que cada um aplica sozinho.</p>
+      <aside>Transição. Respiro. “Agora entra sistemas distribuídos.”</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Arquitetura</p>
+      <h2>Nós idênticos. Uma imagem, três processos.</h2>
+      <div class="row">
+        <div class="card"><strong>API</strong><span>Transações, blocos, sync, peers, métricas.</span></div>
+        <div class="card"><strong>Mempool</strong><span>Fila local, dedup, devolve órfãs no reorg.</span></div>
+        <div class="card"><strong>Minerador</strong><span>PoW sob demanda, depois push aos peers.</span></div>
+        <div class="card"><strong>Validador</strong><span>Hash, elo, dificuldade, nonce — no domínio, não no HTTP.</span></div>
+        <div class="card"><strong>Storage</strong><span>Lista em memória. Reinício = genesis. Isso é feature.</span></div>
+        <div class="card"><strong>PeerClient</strong><span>HTTP/JSON. Timeout 2 s. Falha isolada.</span></div>
+      </div>
+      <aside>Não há broker. A comunicação assíncrona do núcleo obrigatório é o próprio gossip. As réplicas são os nós.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Peer-to-peer</p>
+      <h2>Depois da subida, nenhum nó é indispensável.</h2>
+      <table>
+        <tr><th>Nó</th><th>Host</th><th>Peers</th></tr>
+        <tr><td>node1</td><td>localhost:8080</td><td>node2, node3</td></tr>
+        <tr><td>node2</td><td>localhost:8081</td><td>node1, node3</td></tr>
+        <tr><td>node3</td><td>localhost:8082</td><td>node1, node2</td></tr>
+      </table>
+      <p class="tiny">Descoberta estática via PEERS. Sem registry, sem líder, sem ponto único. DNS interno do Docker resolve nodeN:8080.</p>
+      <aside>Mostrem docker compose ps se a tela estiver ao lado. Três healthy. Qualquer um pode cair.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Gossip</p>
+      <h2>A transação nasce em um nó e chega aos outros em um hop.</h2>
+      <ul class="clean">
+        <li>POST /transactions grava na mempool e anuncia aos peers.</li>
+        <li>POST /transactions/receive aceita ou recusa. O receptor não reenvia.</li>
+        <li>Dedup pela igualdade da transação (record From/To/Amount).</li>
+        <li>409 se já está na fila ou já está confirmada na cadeia.</li>
+      </ul>
+      <p class="tiny">Sem laço de reenvio: com a lista de peers completa, um hop alcança os três. Qualquer nó que tenha a tx pode minerá-la.</p>
+      <aside>Espelha a carteira real: você fala com um nó e conta com a rede. Sem gossip, a tx ficaria presa onde foi postada.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Propagação de bloco</p>
+      <h2>Quem minera empurra. Quem recebe valida sozinho.</h2>
+      <ul class="clean">
+        <li>Índice seguinte, PreviousHash certo, hash recalculado, PoW da dificuldade local.</li>
+        <li>200 aceita — as txs saem da mempool local.</li>
+        <li>409 recusa — duplicado, órfão ou adulterado.</li>
+        <li>Peer offline: log de aviso, mineração local segue.</li>
+      </ul>
+      <aside>O mine só responde depois do push. Quando o 200 chega, os peers já têm o bloco. Demo determinística.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Duas camadas</p>
+      <div class="split">
+        <div>
+          <p class="kicker">Mempool</p>
+          <h2>Estado local</h2>
+          <p class="muted">Gossip. Sem consenso. Cada nó vê a própria fila. Pode divergir por uns instantes. Não tem problema.</p>
+        </div>
+        <div>
+          <p class="kicker">Cadeia</p>
+          <h2>Consenso</h2>
+          <p class="muted">Só entra bloco válido. Conflito se resolve pela cadeia mais longa. Aqui a rede converge.</p>
+        </div>
+      </div>
+      <aside>Frase para o professor: duas malhas de replicação, naturezas diferentes. A etapa 7 existe para esta distinção.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Consenso</p>
+      <h2>A cadeia válida e estritamente mais longa vence.</h2>
+      <ul class="clean">
+        <li>Mesmo genesis — senão é outro universo.</li>
+        <li>Validação local da cadeia inteira. Não confiamos no peer.</li>
+        <li>Empate de altura: cada um fica com a que já tem (first seen).</li>
+      </ul>
+      <p class="tiny">No enunciado: maior trabalho acumulado. Aqui a dificuldade é a mesma nos três nós, então comprimento e trabalho coincidem.</p>
+      <aside>Digam a simplificação antes que perguntem. É decisão documentada, não esquecimento.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Fork</p>
+      <div class="chain">
+        <div class="blk"><b>B0</b>genesis</div>
+        <span class="arrow">—</span>
+        <div class="blk"><b>B1</b>acordo</div>
+        <span class="arrow">┤</span>
+        <div>
+          <div class="blk" style="margin-bottom:0.5rem"><b>B2a</b>node1 + node3</div>
+          <div class="blk"><b>B2b</b>node2 isolado</div>
+        </div>
+      </div>
+      <p class="lead">Duas versões válidas no mesmo índice, hashes diferentes. Sem coordenador, isso é o estado natural — não um erro.</p>
+      <aside>Nasce na partição, ou se dois nós minam na mesma janela. Na aula provocamos com docker network disconnect.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Reorg</p>
+      <h2>O ramo perdedor some. As transações dele não.</h2>
+      <ul class="clean">
+        <li>POST /sync puxa GET /chain dos peers e aplica a regra.</li>
+        <li>Blocos descartados viram órfãos.</li>
+        <li>Txs do órfão voltam à mempool, salvo as que a cadeia vencedora já confirmou.</li>
+      </ul>
+      <p class="tiny">Uma confirmação pode ser desfeita. Quanto mais blocos sobre ela, mais cara a reescrita. Finalidade probabilística, em sala.</p>
+      <aside>É o momento bonito da demo: orphansBackToMempool = 1, e a T2 é re-minerada no topo.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Consistência eventual</p>
+      <h2>Os nós não estão iguais o tempo todo. Eles convergem.</h2>
+      <p class="lead">Durante a partição, cada lado avança a própria cadeia. Quando o caminho volta, a regra local restaura um único histórico. Sem eleição, sem coordenador, sem relógio global.</p>
+      <aside>Definir o termo da disciplina com o que eles vão ver daqui a dois slides no terminal.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Observabilidade</p>
+      <div class="row">
+        <div class="card"><strong>Logs</strong><span>ILogger → console → Alloy → Loki → Grafana.</span></div>
+        <div class="card"><strong>Métricas</strong><span>GET /metrics → Prometheus → Grafana, por nó.</span></div>
+        <div class="card"><strong>Traces</strong><span>OpenTelemetry + traceparent → Jaeger.</span></div>
+      </div>
+      <p class="tiny">O código instrumenta. A plataforma transporta. Trocar Jaeger ou Prometheus não mexe no C# do nó.</p>
+      <aside>Overlay do compose: docker-compose.observability.yml. Sem ele, os três nós sobem iguais.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Jaeger</p>
+      <h2>Um trace, três serviços.</h2>
+      <div class="flow">
+        <div class="pill">node1 <em>POST /blocks/mine</em></div>
+        <span class="arrow">→</span>
+        <div class="pill">span <em>mine</em> (PoW)</div>
+        <span class="arrow">→</span>
+        <div class="pill">node2 e node3 <em>/blocks/receive</em></div>
+      </div>
+      <p class="lead">O HttpClient injeta o traceparent. O ASP.NET relê na entrada. A prova visual de que a mensagem atravessou a rede — não um log colado.</p>
+      <p class="tiny">O submit da transação é outro HTTP, outro trace. O caminho contínuo que implementamos é o da mineração e da propagação do bloco.</p>
+      <aside>Abram Jaeger em localhost:16686, serviço node1, operação POST /blocks/mine. Digam a limitação do trace da tx.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Grafana</p>
+      <table>
+        <tr><th>Enunciado</th><th>No dashboard</th></tr>
+        <tr><td>Altura da cadeia</td><td><span class="tag ok">feito</span> &nbsp; satus_chain_length</td></tr>
+        <tr><td>Tamanho da mempool</td><td><span class="tag ok">feito</span> &nbsp; satus_mempool_size</td></tr>
+        <tr><td>Latência de propagação</td><td><span class="tag warn">parcial</span> &nbsp; HTTP p95 como proxy</td></tr>
+        <tr><td>Taxa de hash</td><td><span class="tag bad">não</span></td></tr>
+        <tr><td>Número de forks</td><td><span class="tag bad">não</span></td></tr>
+      </table>
+      <aside>Honestidade vale nota. O que o Grafana mostra bem: as três alturas se separando na partição e se reencontrando no sync.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Testes</p>
+      <h2>~97 casos em xUnit. Unidade e integração.</h2>
+      <ul class="clean">
+        <li>Unidade: hash, PoW, cadeia, reorg, órfãs, mempool, PeerClient, telemetria.</li>
+        <li>Integração: sobe o executável real em porta livre e fala HTTP.</li>
+        <li>2–3 nós no mesmo teste: gossip, push, fork, sync, peer morto.</li>
+      </ul>
+      <aside>Se perguntarem qualidade: a integração sobe o executável real. Não é só curl na aula.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Agora, ao vivo</p>
+      <h2>Cada comando tem três janelas.</h2>
+      <div class="row">
+        <div class="card"><strong>Terminal · a API</strong><span>O pedido e a resposta. Hash, nonce, 400, adopted.</span></div>
+        <div class="card"><strong>Jaeger · :16686</strong><span>Um trace, vários nós. Filtrar a operação, senão o /metrics afoga.</span></div>
+        <div class="card"><strong>Grafana · :3000/d/satus-nos</strong><span>Altura e mempool por nó. Esperar 5 s após o comando.</span></div>
+        <div class="card"><strong>Loki · Explore</strong><span>A linha que o processo escreveu: minerado, inacessível, Cadeia adotada.</span></div>
+      </div>
+      <p class="tiny">Roteiro passo a passo: docs/apresentacao/ROTEIRO.md.</p>
+      <aside>Saiam dos slides. Um no terminal, o outro nas abas. Ctrl+Tab: Grafana, Jaeger, Loki.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Demo 1 · Queda de nó</p>
+      <div class="flow">
+        <div class="pill">stop node3</div>
+        <span class="arrow">→</span>
+        <div class="pill">os outros minam</div>
+        <span class="arrow">→</span>
+        <div class="pill">start node3</div>
+        <span class="arrow">→</span>
+        <div class="pill">POST /sync</div>
+      </div>
+      <p class="lead">Ele volta no genesis. Um pull reconstrói. A rede não esperou o morto.</p>
+      <p class="tiny">Grafana: alvo do node3 some, depois a curva salta de 1 para N. &nbsp;·&nbsp; Jaeger: POST /sync do node3, span adopted. &nbsp;·&nbsp; Loki: inacessível, depois Cadeia adotada.</p>
+      <aside>Passo 4 do roteiro. Prometheus /targets mostra o DOWN. O salto da curva precisa ser visto acontecendo.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Demo 2 · Partição</p>
+      <div class="flow">
+        <div class="pill">network disconnect node2</div>
+        <span class="arrow">→</span>
+        <div class="pill">cada lado minera</div>
+        <span class="arrow">→</span>
+        <div class="pill">fork</div>
+        <span class="arrow">→</span>
+        <div class="pill">reconnect + /sync</div>
+      </div>
+      <p class="lead">Dois históricos válidos. Ao religar, a mais longa vence. A órfã volta à mempool.</p>
+      <p class="tiny">Grafana: duas alturas à frente, uma parada; push unreachable; depois as três se reencontram. &nbsp;·&nbsp; Jaeger: mine do node2 com 409; sync com orphans=1. &nbsp;·&nbsp; Loki: inacessível, 409, Cadeia adotada.</p>
+      <aside>Passos 5–7 do roteiro. Por que não docker pause: o socket fica vivo e o fork não nasce.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Demo 3 · Acréscimo de nó</p>
+      <h2>Um quarto processo na mesma rede, depois um sync.</h2>
+      <ul class="clean">
+        <li>Mesma imagem. PEERS aponta para quem já está no ar.</li>
+        <li>POST /sync baixa a cadeia. Ele alcança os demais.</li>
+        <li>Os antigos só passam a anunciá-lo quando o PEERS deles for atualizado.</li>
+      </ul>
+      <p class="tiny">Jaeger: POST /sync do node4, span adopted. O Grafana não ganha o quarto nó sozinho — o Prometheus só raspa os três do compose.</p>
+      <aside>Passo 8 do roteiro. Se o tempo acabar, uma frase: nó novo faz o mesmo pull do nó que voltou do genesis.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Enunciado × projeto</p>
+      <table>
+        <tr><th>Pedido</th><th></th><th>Como está</th></tr>
+        <tr><td>3+ nós, sem centro</td><td><span class="tag ok">feito</span></td><td>Compose, peers cruzados</td></tr>
+        <tr><td>Tx válida / inválida</td><td><span class="tag ok">feito</span></td><td>400 ou mempool</td></tr>
+        <tr><td>Gossip + dedup, sem laço</td><td><span class="tag ok">feito</span></td><td>1 hop; igualdade do record</td></tr>
+        <tr><td>PoW, nonce, dificuldade</td><td><span class="tag ok">feito</span></td><td>DIFFICULTY configurável</td></tr>
+        <tr><td>Validação independente</td><td><span class="tag warn">parcial</span></td><td>Hash, elo, PoW. Timestamp não</td></tr>
+        <tr><td>Maior trabalho + reorg</td><td><span class="tag warn">parcial</span></td><td>Longest chain; órfãs na mempool</td></tr>
+        <tr><td>Trace ponta a ponta da tx</td><td><span class="tag warn">parcial</span></td><td>Contínuo no mine → receive</td></tr>
+        <tr><td>Métricas do enunciado</td><td><span class="tag warn">parcial</span></td><td>Altura e mempool; falta hash/forks</td></tr>
+        <tr><td>Teste de carga</td><td><span class="tag bad">não</span></td><td>—</td></tr>
+        <tr><td>Auto-scale de nós (bônus)</td><td><span class="tag bad">não</span></td><td>—</td></tr>
+      </table>
+      <aside>Não peçam desculpa. Digam o critério: o que era necessário para demonstrar o conceito entrou; o resto ficou explícito.</aside>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Decisões didáticas</p>
+      <div class="row">
+        <div class="card"><strong>Memória volátil</strong><span>Reinício = genesis. A recuperação cabe em quinze segundos.</span></div>
+        <div class="card"><strong>Mine sob demanda</strong><span>Fork reproduzível. Sem corrida no fundo.</span></div>
+        <div class="card"><strong>Sync manual</strong><span>Quem decide sincronizar fica visível no roteiro.</span></div>
+        <div class="card"><strong>Sem broker</strong><span>Gossip entre pares cobre a comunicação assíncrona.</span></div>
+      </div>
+      <aside>Assinatura, saldo, persistência, TLS: fora de escopo em docs/ARCHITECTURE.md, seção 12. Não são sistemas distribuídos; são outra disciplina.</aside>
+    </section>
+
+    <section class="slide center">
+      <p class="kicker">Fechamento</p>
+      <h2>Três processos. Uma regra local. Zero coordenador.</h2>
+      <p class="lead">Hash, PoW e cadeia mais longa restauram o acordo quando a rede volta. O resto é consequência.</p>
+      <p class="muted">Perguntas.</p>
+      <aside>Frase final e param. Se ninguém perguntar: “a mempool é compartilhada?” — e respondem não.</aside>
+    </section>
+
+  </div>
+
+  <div id="bar"><i></i></div>
+  <div id="hud"></div>
+  <div id="notes"></div>
+  <div id="help">
+    <div class="box">
+      <h3>Atalhos</h3>
+      <p><kbd>→</kbd> <kbd>Espaço</kbd> próximo</p>
+      <p><kbd>←</kbd> anterior &nbsp; <kbd>Home</kbd> / <kbd>End</kbd></p>
+      <p><kbd>F</kbd> tela cheia &nbsp; <kbd>N</kbd> notas</p>
+      <p><kbd>?</kbd> fecha esta ajuda</p>
+    </div>
+  </div>
+
+  <script>
+    const slides = [...document.querySelectorAll(".slide")];
+    const bar = document.querySelector("#bar > i");
+    const hud = document.getElementById("hud");
+    const notes = document.getElementById("notes");
+    const help = document.getElementById("help");
+    let i = Math.max(0, (+location.hash.slice(1) || 1) - 1);
+
+    function show(n) {
+      i = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach((s, k) => s.classList.toggle("on", k === i));
+      bar.style.width = ((i + 1) / slides.length * 100) + "%";
+      hud.textContent = (i + 1) + " / " + slides.length;
+      const aside = slides[i].querySelector("aside");
+      notes.innerHTML = aside ? "<b>Falar</b> — " + aside.textContent : "";
+      history.replaceState(null, "", "#" + (i + 1));
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
+        e.preventDefault(); show(i + 1);
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault(); show(i - 1);
+      } else if (e.key === "Home") show(0);
+      else if (e.key === "End") show(slides.length - 1);
+      else if (e.key === "f" || e.key === "F") {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+        else document.exitFullscreen();
+      } else if (e.key === "n" || e.key === "N") notes.classList.toggle("on");
+      else if (e.key === "?" || e.key === "h" || e.key === "H") help.classList.toggle("on");
+      else if (e.key === "Escape") help.classList.remove("on");
+    });
+
+    help.addEventListener("click", () => help.classList.remove("on"));
+    show(i);
+  </script>
+</body>
+</html>
