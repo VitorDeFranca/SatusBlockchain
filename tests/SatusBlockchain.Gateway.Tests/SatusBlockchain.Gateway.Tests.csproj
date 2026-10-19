@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SatusBlockchain.Gateway\SatusBlockchain.Gateway.csproj" />
+
+    <!-- O nó só entra para que o executável dele (SatusBlockchain.Node.exe) seja copiado para a
+         pasta de saída: os testes de integração sobem nós REAIS, como os do projeto de testes
+         do nó. O NodeServer é o mesmo arquivo, compartilhado por link em vez de copiado. -->
+    <ProjectReference Include="..\..\src\SatusBlockchain.Node\SatusBlockchain.Node.csproj" />
+    <Compile Include="..\SatusBlockchain.Node.Tests\Integration\NodeServer.cs"
+             Link="Integration\NodeServer.cs" />
+  </ItemGroup>
+
+</Project>

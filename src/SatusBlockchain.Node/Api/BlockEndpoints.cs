@@ -16,6 +16,11 @@ public static class BlockEndpoints
     {
         var group = routes.MapGroup("/blocks").WithTags("Blocks");
 
+        // Etapa 12: o que este nó faria com o bloco, sem anexá-lo — hash recalculado, PoW e
+        // encaixe no topo. É o "porquê" de um 409: o console mostra um bloco adulterado com o
+        // hash declarado de um lado e o recalculado do outro.
+        group.MapPost("/inspect", (Block block, Blockchain blockchain) => Results.Ok(blockchain.Inspect(block)));
+
         // Minera sob demanda com o que está na mempool e propaga o bloco aos peers
         // (push: POST /blocks/receive). Um peer offline não derruba a mineração local:
         // o PeerClient trata cada falha individualmente e apenas registra no log.

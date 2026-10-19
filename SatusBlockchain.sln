@@ -11,6 +11,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SatusBlockchain.Node.Tests", "tests\SatusBlockchain.Node.Tests\SatusBlockchain.Node.Tests.csproj", "{6F4DE834-06F1-4447-A751-9FB166D3C712}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SatusBlockchain.Gateway", "src\SatusBlockchain.Gateway\SatusBlockchain.Gateway.csproj", "{296846F6-3D04-4D0B-96B2-CA2211745347}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SatusBlockchain.Gateway.Tests", "tests\SatusBlockchain.Gateway.Tests\SatusBlockchain.Gateway.Tests.csproj", "{74EA2217-C3C4-47E4-B9C7-286834084709}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -45,6 +49,30 @@ Global
 		{6F4DE834-06F1-4447-A751-9FB166D3C712}.Release|x64.Build.0 = Release|Any CPU
 		{6F4DE834-06F1-4447-A751-9FB166D3C712}.Release|x86.ActiveCfg = Release|Any CPU
 		{6F4DE834-06F1-4447-A751-9FB166D3C712}.Release|x86.Build.0 = Release|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Debug|x64.Build.0 = Debug|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Debug|x86.Build.0 = Debug|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Release|Any CPU.Build.0 = Release|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Release|x64.ActiveCfg = Release|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Release|x64.Build.0 = Release|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Release|x86.ActiveCfg = Release|Any CPU
+		{296846F6-3D04-4D0B-96B2-CA2211745347}.Release|x86.Build.0 = Release|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Debug|x64.Build.0 = Debug|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Debug|x86.Build.0 = Debug|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Release|Any CPU.Build.0 = Release|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Release|x64.ActiveCfg = Release|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Release|x64.Build.0 = Release|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Release|x86.ActiveCfg = Release|Any CPU
+		{74EA2217-C3C4-47E4-B9C7-286834084709}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -52,5 +80,7 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{8D3800E2-5C86-41E2-A692-6CD1A2CF180A} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{6F4DE834-06F1-4447-A751-9FB166D3C712} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{296846F6-3D04-4D0B-96B2-CA2211745347} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{74EA2217-C3C4-47E4-B9C7-286834084709} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

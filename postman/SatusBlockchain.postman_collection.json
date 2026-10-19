@@ -25,6 +25,10 @@
     {
       "key": "difficulty",
       "value": "4"
+    },
+    {
+      "key": "consoleUrl",
+      "value": "http://localhost:3001"
     }
   ],
   "item": [
@@ -2111,6 +2115,253 @@
               ]
             },
             "description": "Com remove-node.ps1 (docker stop) o node4 se despediu e sumiu na hora. Com -Crash, este teste só passa depois de 3 chamadas sem resposta ao node4: sementes nunca saem por falha, nós dinâmicos sim."
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Console web",
+      "description": "Opcional: a API do console web (a tela fica em http://localhost:3001). Terminal, antes do 10.1 (acrescenta o console à stack que já está no ar):\n  docker compose -f docker-compose.yml -f docker-compose.observability.yml -f docker-compose.console.yml up --build -d\n\nO gateway consulta todos os nós e só repassa as operações: o corpo volta como o nó respondeu.\nPara ver o status mudar: docker compose stop node3, o 10.2 duas vezes, docker compose start node3 e o 10.1 — o node3 aparece behind até POST {{consoleUrl}}/api/nodes/node3/sync.",
+      "item": [
+        {
+          "name": "10.1 console — GET /api/network",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (console no ar)', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('resumo da rede', () => {",
+                  "    pm.expect(r.summary.total).to.be.at.least(1);",
+                  "    pm.expect(r.summary.converged).to.be.a('boolean');",
+                  "});",
+                  "pm.test('cada nó tem estado e status em texto', () => {",
+                  "    r.nodes.forEach((n) => {",
+                  "        pm.expect(['running', 'unreachable', 'stopped']).to.include(n.state);",
+                  "        pm.expect(['ok', 'behind', 'diverged', 'invalid', 'incompatible', 'unknown']).to.include(n.status);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/network",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "network"
+              ]
+            },
+            "description": "A rede inteira num pedido: o gateway consulta todos os nós em paralelo e diz, para cada um, se respondeu (state) e como a cadeia dele se compara com a líder (status: ok, behind = atrasado, diverged = fork...). É o que a tela do console pede a cada 2 s."
+          }
+        },
+        {
+          "name": "10.2 console — POST /api/nodes/node2/mine",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 (minerou) ou 409 (a cadeia mudou durante a mineração)', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));",
+                  "if (pm.response.code === 200) {",
+                  "    const bloco = pm.response.json();",
+                  "    pm.test('o corpo é o bloco do nó, intacto (o gateway só repassa)', () => {",
+                  "        pm.expect(bloco.index).to.be.at.least(1);",
+                  "        pm.expect(bloco.hash).to.have.lengthOf(64);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/nodes/node2/mine",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "nodes",
+                "node2",
+                "mine"
+              ]
+            },
+            "description": "O gateway repassa ao POST /blocks/mine do node2 e devolve status e corpo como o nó respondeu. Enviem o 10.1 em seguida: o maxLength cresceu e todos continuam converged. Mesma ideia para /transactions e /sync."
+          }
+        },
+        {
+          "name": "10.3 console — GET /api/capabilities",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('informa se gerencia nós (Docker)', () => pm.expect(r.canManageNodes).to.be.a('boolean'));",
+                  "pm.test('links de observabilidade', () => pm.expect(r.links.grafana).to.match(/^http/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/capabilities",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "capabilities"
+              ]
+            },
+            "description": "runtime docker: o console cria e derruba nós pelo socket do Docker; none: só vê e opera a rede. Com Docker, POST {{consoleUrl}}/api/nodes cria um nó novo (nome, semente e dificuldade escolhidos pelo console) e POST {{consoleUrl}}/api/nodes/{id}/stop?mode=crash simula uma queda."
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Laboratório de falhas",
+      "description": "Fork sem derrubar nada: a partição é simulada nos próprios nós e vale só para o tráfego entre eles. A tela guiada fica no console, aba Laboratório de falhas. Precisa do console da pasta 10.\n\nEntre o 11.1 e o 11.2: minerem uma vez no node3 (POST {{node3Url}}/blocks/mine) e duas no node1 (POST {{node1Url}}/blocks/mine). Cada lado segue por conta própria — um fork: o 10.1 mostra o node3 diverged.\n\nDireto nos nós, sem o console: PUT {{node3Url}}/lab/partition com {\"group\": \"B\"}, PUT .../lab/delay com {\"ms\": 3000} (nó lento: acima de 2 s, os peers o veem como caído) e DELETE .../lab. E POST .../blocks/inspect com um bloco de GET /chain (troquem um amount) mostra o hash recalculado divergindo do declarado.",
+      "item": [
+        {
+          "name": "11.1 console — PUT /api/lab/partition (isolar o node3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('um resultado por nó', () => pm.expect(r).to.be.an('array').that.is.not.empty);",
+                  "pm.test('o node3 foi para o lado B', () => {",
+                  "    const n3 = r.find((x) => x.node === 'node3');",
+                  "    pm.expect(n3.status).to.eql(200);",
+                  "    pm.expect(n3.body.partition).to.eql('B');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"groups\": { \"node1\": \"A\", \"node2\": \"A\", \"node3\": \"B\" }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{consoleUrl}}/api/lab/partition",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "lab",
+                "partition"
+              ]
+            },
+            "description": "Partição simulada: nós de lados diferentes recusam o tráfego entre si (503), mas o console e o Postman continuam operando os dois. Para curar só a partição: o mesmo request com groups = {}."
+          }
+        },
+        {
+          "name": "11.2 console — DELETE /api/lab (remover as falhas)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('todos sem partição e sem atraso', () => {",
+                  "    r.forEach((x) => {",
+                  "        pm.expect(x.body.partition).to.eql(null);",
+                  "        pm.expect(x.body.delayMs).to.eql(0);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/lab",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "lab"
+              ]
+            },
+            "description": "Tira a partição e a lentidão de todos os nós. Os forks NÃO se desfazem sozinhos: depois disso, enviem o 11.3 (sincronizar todos)."
+          }
+        },
+        {
+          "name": "11.3 console — POST /api/lab/sync-all (sincronizar todos)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('o relatório do sync de cada nó', () => {",
+                  "    r.forEach((x) => pm.expect(x.body.length).to.be.a('number'));",
+                  "});",
+                  "const adotou = r.filter((x) => x.body && x.body.adopted);",
+                  "if (adotou.length > 0) {",
+                  "    pm.test('quem estava no ramo perdedor adotou a cadeia mais longa', () => pm.expect(adotou[0].body.length).to.be.above(adotou[0].body.previousLength));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{consoleUrl}}/api/lab/sync-all",
+              "host": [
+                "{{consoleUrl}}"
+              ],
+              "path": [
+                "api",
+                "lab",
+                "sync-all"
+              ]
+            },
+            "description": "POST /sync em cada nó, um de cada vez: depois de curar a partição, é assim que a rede converge pela longest chain rule. O nó do ramo perdedor mostra adopted e orphansBackToMempool (as transações do bloco descartado voltam para a mempool). Durante a partição, nada atravessa: nem o pull."
           }
         }
       ]

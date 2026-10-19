@@ -108,6 +108,35 @@ public class Blockchain
     }
 
     /// <summary>
+    /// Explica, SEM anexar, o que <see cref="AddBlock"/> faria com o bloco (etapa 12 —
+    /// explorador e laboratório do console). Usa exatamente as regras de aceitação: hash
+    /// recalculado (adulteração), Proof of Work e encaixe no topo (índice e elo).
+    /// </summary>
+    public BlockInspection Inspect(Block block)
+    {
+        var recalculated = Hasher.ComputeHash(block);
+        var hashMatches = block.Hash == recalculated;
+        var proofOfWork = ProofOfWork.SatisfiesDifficulty(block.Hash, Difficulty);
+
+        lock (_lock)
+        {
+            var inChain = block.Index >= 0 && block.Index < _chain.Count
+                && _chain[(int)block.Index].Hash == block.Hash;
+            var extendsTip = block.Index == _chain.Count && block.PreviousHash == _chain[^1].Hash;
+
+            var verdict =
+                !hashMatches ? "Adulterado: o hash recalculado não bate com o declarado — o conteúdo mudou depois da mineração."
+                : !proofOfWork ? $"Sem Proof of Work válido: o hash não começa com {Difficulty} zeros."
+                : inChain ? $"Íntegro e já presente na cadeia deste nó (posição {block.Index})."
+                : !extendsTip ? "Íntegro, mas não encaixa no topo desta cadeia (índice ou elo): duplicado, órfão ou de outro ramo."
+                : "Íntegro e encaixa no topo: seria aceito.";
+
+            return new BlockInspection(recalculated, hashMatches, proofOfWork, inChain, extendsTip,
+                WouldAccept: hashMatches && proofOfWork && extendsTip, verdict);
+        }
+    }
+
+    /// <summary>
     /// A transação já está confirmada em algum bloco da cadeia?
     ///
     /// Usado pelo gossip (etapa 7): o bloco pode chegar ANTES da transação, dependendo de

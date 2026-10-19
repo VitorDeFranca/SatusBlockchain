@@ -293,6 +293,10 @@ FakesAssemblies/
 .ntvs_analysis.dat
 node_modules/
 
+# Console web (etapa 11): o build da UI (ui/) é gerado direto no wwwroot do gateway
+src/SatusBlockchain.Gateway/wwwroot/
+ui/dist/
+
 # Visual Studio 6 build log
 *.plg
 

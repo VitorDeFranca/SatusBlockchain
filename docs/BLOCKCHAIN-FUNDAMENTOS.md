@@ -295,8 +295,10 @@ distribuídos. O SatusBlockchain omite deliberadamente:
 | Consenso (longest chain) e reorg | `Blockchain.TryReplaceChain()`, `POST /sync` | 8 |
 | Observabilidade (logs, métricas, traces) | `Observability/NodeTelemetry.cs`, `GET /metrics`, stack do overlay | 9 |
 | Membership dinâmica (entrar, sair, detecção de falha) | `Networking/PeerRegistry.cs`, `Networking/MembershipService.cs`, `POST`/`DELETE /peers`, `scripts/` | 10 |
-| Fork e convergência | roteiro de demonstração | 11 |
-| Consistência eventual e recuperação | demos das etapas 8–11 | 8–11 |
+| A rede inteira vista de fora (visões locais × visão global) | console web: `src/SatusBlockchain.Gateway` + `ui/` | 11 |
+| Fork e convergência | laboratório: partição simulada (`/lab`), roteiro guiado no console, comparação de cadeias no explorador | 12 |
+| Tamper-evidence na prática (bloco adulterado recusado) | `POST /blocks/inspect`, laboratório → "Bloco adulterado" | 12 |
+| Consistência eventual e recuperação | demos das etapas 8–12 | 8–12 |
 
 ---
 

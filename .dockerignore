@@ -6,6 +6,11 @@
 **/obj/
 **/TestResults/
 
+# Console web: dependências e build da UI são refeitos dentro da imagem do console
+**/node_modules/
+ui/dist/
+src/SatusBlockchain.Gateway/wwwroot/
+
 # Repositório / IDE / documentação / testes: não entram na imagem do nó
 .git/
 .gitignore

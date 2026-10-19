@@ -5,7 +5,9 @@
 O sistema é composto por **um único projeto ASP.NET Core** (o "nó"), implantado N vezes
 com configurações diferentes via Docker Compose. A distribuição do sistema vem da
 **replicação do processo**, não de microsserviços: cada nó é autônomo, mantém sua própria
-cópia da blockchain em memória e se comunica com os demais por HTTP/REST.
+cópia da blockchain em memória e se comunica com os demais por HTTP/REST. Há também um
+segundo projeto, o **console web** (`SatusBlockchain.Gateway` + `ui/`), que não faz parte da
+rede: ele a observa e opera de fora, pela API dos nós (seção 10).
 
 ### Implantação com Docker Compose
 
@@ -30,20 +32,30 @@ SatusBlockchain/
 │   └── apresentacao/              # slides (index.html) e roteiro de fala (ROTEIRO.md)
 ├── postman/                       # collection da demo e a ordem de envio
 ├── src/
-│   └── SatusBlockchain.Node/
-│       ├── Core/              # domínio: Block, Transaction, Blockchain, Mempool, Hasher, ProofOfWork
-│       ├── Networking/        # PeerClient (comunicação de saída com outros nós)
-│       ├── Api/               # endpoints Minimal API agrupados por recurso
-│       ├── Observability/     # NodeTelemetry: contadores/gauges satus.* e spans próprios
-│       ├── Program.cs         # composição da aplicação (DI, endpoints, pipeline OpenTelemetry)
-│       └── Dockerfile         # imagem do nó (build multi-stage)
+│   ├── SatusBlockchain.Node/
+│   │   ├── Core/              # domínio: Block, Transaction, Blockchain, Mempool, Hasher, ProofOfWork
+│   │   ├── Networking/        # PeerClient (comunicação de saída com outros nós)
+│   │   ├── Api/               # endpoints Minimal API agrupados por recurso
+│   │   ├── Observability/     # NodeTelemetry: contadores/gauges satus.* e spans próprios
+│   │   ├── Lab/               # laboratório de falhas: LabState, PeerTrafficMiddleware
+│   │   ├── Program.cs         # composição da aplicação (DI, endpoints, pipeline OpenTelemetry)
+│   │   └── Dockerfile         # imagem do nó (build multi-stage)
+│   └── SatusBlockchain.Gateway/  # console web: snapshot da rede, proxy, ciclo de vida (Docker)
+│       ├── Network/           # NetworkService, NodeProbe, StatusClassifier
+│       ├── Nodes/             # NodeProxy (operações repassadas), NodeLifecycle (criar/parar/remover)
+│       ├── Runtime/           # INodeRuntime: DockerNodeRuntime (socket) e NullNodeRuntime
+│       ├── Api/               # /api/network, /api/capabilities, /api/nodes/...
+│       └── Dockerfile         # imagem do console: UI (node) + gateway (sdk) → aspnet
+├── ui/                        # SPA do console (React + Vite + TS); `npm run build` → wwwroot do gateway
 ├── tests/
-│   └── SatusBlockchain.Node.Tests/
-│       ├── Unit/               # domínio isolado (sem rede, sem processo)
-│       └── Integration/        # sobe o nó e conversa por HTTP
-├── .dockerignore              # contexto de build enxuto (sem bin/obj/docs/tests)
+│   ├── SatusBlockchain.Node.Tests/
+│   │   ├── Unit/               # domínio isolado (sem rede, sem processo)
+│   │   └── Integration/        # sobe o nó e conversa por HTTP
+│   └── SatusBlockchain.Gateway.Tests/  # console: unidade (nós/Docker simulados) e integração (gateway + nós reais)
+├── .dockerignore              # contexto de build enxuto (sem bin/obj/docs/tests/node_modules)
 ├── docker-compose.yml         # os 3 nós (node1, node2, node3)
 ├── docker-compose.observability.yml  # overlay: Jaeger, Prometheus, Grafana, Loki, Alloy + OTLP
+├── docker-compose.console.yml # overlay: o console web, com o socket do Docker
 ├── observability/             # config da stack: scrape do Prometheus, Loki, Alloy e provisioning do Grafana
 ├── SatusBlockchain.sln
 └── README.md
@@ -51,16 +63,22 @@ SatusBlockchain/
 
 ### Testes
 
-Um projeto só, `tests/SatusBlockchain.Node.Tests`, com uma pasta e um namespace por tipo.
+Um projeto para o nó, `tests/SatusBlockchain.Node.Tests`, e outro para o console,
+`tests/SatusBlockchain.Gateway.Tests`, cada um com uma pasta e um namespace por tipo.
 Os comandos estão no README.
 
 - **Unidade** (`Unit/`, namespace `Tests.Unit`): `Block`, `Hasher`, `ProofOfWork`,
-  `Blockchain`, `Mempool`, `NodeOptions`, `PeerClient` e `NodeTelemetry`. Classes isoladas,
-  sem rede e sem subir processo.
+  `Blockchain` (com o `Inspect`), `Mempool`, `NodeOptions`, `PeerClient`, `NodeTelemetry` e o
+  laboratório (`LabState`, `PeerHeadersHandler`). Classes isoladas, sem rede e sem subir processo.
 - **Integração** (`Integration/`, namespace `Tests.Integration`): sobe o executável numa
   porta livre e conversa por HTTP. Cobre rotas, status codes, `NODE_ID`/`DIFFICULTY`,
-  o fluxo mempool → bloco, o push de blocos, o gossip de transações, o `/sync` e as
-  métricas. Um processo novo por teste.
+  o fluxo mempool → bloco, o push de blocos, o gossip de transações, o `/sync`, as
+  métricas e o laboratório (partição gerando fork, lentidão, `POST /blocks/inspect`).
+  Um processo novo por teste.
+- **Console** (`tests/SatusBlockchain.Gateway.Tests`): unidade para o snapshot, a regra de
+  status, as regras de criar/remover nós e o lado Docker (contra uma Engine API de mentira);
+  integração com o gateway e nós reais em processos. A interface tem os próprios testes em
+  `ui/` (`npm test`).
 
 ## 3. Componentes e responsabilidades
 
@@ -73,6 +91,9 @@ Os comandos estão no README.
 | `Blockchain` | Cadeia em memória: genesis, adição de bloco, validação, substituição (reorg) | falar HTTP |
 | `Mempool` | Fila FIFO de transações pendentes, com dedup por valor | priorização por taxa, evicção, expiração |
 | `PeerClient` | HTTP de saída tolerante a peer offline: push de bloco, gossip de transação e pull da cadeia (`/sync`) | regras de consenso (a validação é do domínio) |
+| `LabState` | Falhas injetadas: grupo de partição e atraso para peers | afetar quem não é peer (console, curl) |
+| `PeerTrafficMiddleware` | Na entrada: recusa (503) peer de outro grupo de partição e atrasa a resposta a peers quando o nó está "lento" | olhar requisições sem `X-Satus-Peer` |
+| `PeerHeadersHandler` | Na saída do `PeerClient`: marca a requisição como de peer (`X-Satus-Peer`) e com o grupo (`X-Satus-Partition`) | decidir nada — só marca |
 | `NodeTelemetry` | Instrumentação: contadores/gauges `satus.*` e spans próprios `mine`/`sync` | exportar (papel do pipeline OpenTelemetry do `Program.cs`) ou gravar logs |
 | Endpoints | Exposição REST do nó | lógica de domínio |
 
@@ -90,6 +111,8 @@ Os comandos estão no README.
 | `POST /blocks/receive` | Recebe um bloco propagado (200 aceito; 409 se não estende a cadeia) |
 | `GET /peers` | Peers configurados (`PEERS`) |
 | `POST /sync` | Puxa a cadeia dos peers e adota a válida mais longa |
+| `POST /blocks/inspect` | O que o nó faria com o bloco, sem anexá-lo: hash recalculado, PoW, encaixe e veredito |
+| `GET`/`DELETE /lab` · `PUT /lab/partition` · `PUT /lab/delay` | Laboratório: partição simulada e lentidão, só no tráfego entre nós |
 | `GET /metrics` | Métricas do nó no formato Prometheus |
 
 ## 4. Proof of Work
@@ -151,6 +174,28 @@ Os comandos estão no README.
   cadeia adotada já confirmou.
 - O sync é **manual**: não há `BackgroundService` consultando os peers sozinho. Deixa explícito
   quem decide sincronizar e mantém a demonstração e os testes determinísticos.
+
+### Laboratório de falhas
+
+Para demonstrar fork e convergência sem derrubar nada, cada nó aceita **falhas injetadas** que
+valem só para o tráfego entre nós:
+
+| Falha | Endpoint | Efeito |
+|-------|----------|--------|
+| Partição | `PUT /lab/partition` `{"group": "B"}` (null = sair) | o nó só aceita peers do mesmo grupo; os outros levam **503** — em push, gossip, pull, anúncio e despedida |
+| Lentidão | `PUT /lab/delay` `{"ms": 3000}` | cada requisição de peer espera antes de ser atendida; acima de 2 s (timeout do `PeerClient`), o nó parece caído |
+| — | `GET /lab` · `DELETE /lab` | estado atual · volta ao normal |
+
+- **Como o nó sabe que é um peer**: o `PeerHeadersHandler` (um `DelegatingHandler` no
+  `HttpClient` do `PeerClient`) põe `X-Satus-Peer` e, se o nó está num grupo,
+  `X-Satus-Partition` em toda requisição de saída. O `PeerTrafficMiddleware` lê esses cabeçalhos
+  na entrada. Sem `X-Satus-Peer` (console, Postman, curl), nada é filtrado — por isso os **dois
+  lados** de uma partição continuam operáveis, e dá para minerar em cada um.
+- Por que não `docker network disconnect`: cortaria também o console. E o 503 da partição é
+  uma resposta — ninguém sai da lista de ninguém; curou, o tráfego volta.
+- **`POST /blocks/inspect`** (`Blockchain.Inspect`): a régua do `AddBlock` aplicada a um bloco
+  sem anexá-lo — hash recalculado pelo `Hasher` do nó, Proof of Work, se já está na cadeia e se
+  encaixa no topo, com um veredito em português. É o "porquê" de um 409 de bloco adulterado.
 
 ## 6. Consenso
 
@@ -243,3 +288,71 @@ Os três pilares, cada um com o seu caminho:
   `__meta_docker_container_*` em labels consultáveis (`compose_project`, `compose_service`,
   `container`) — sem esse passo o Loki recebe os logs **sem nenhum label de container**, e
   todo LogQL vira varrer tudo.
+
+## 10. Console web
+
+```
+ navegador ──► console (container, 127.0.0.1:3001) ──► node1..nodeN   (HTTP, rede satus-net)
+               SatusBlockchain.Gateway + SPA (ui/)  └─► Docker Engine (socket) — criar/parar nós
+```
+
+Um **gateway ASP.NET** (`src/SatusBlockchain.Gateway`) hospeda a SPA compilada (`ui/` →
+`wwwroot`) e a API `/api/*`. Mesma origem, então **sem CORS**; e o gateway roda na rede do
+Docker, então alcança `http://nodeN:8080`, que o navegador não resolveria. **Os nós não mudam**:
+o gateway só usa a API que eles já expõem.
+
+| Peça | Responsabilidade | Não faz |
+|------|------------------|---------|
+| `NetworkService` | Snapshot da rede: descobre os nós (plataforma + `GATEWAY_NODES` + busca em largura pelas listas de peers), consulta todos em paralelo e monta `GET /api/network` | falhar por causa de um nó: quem não responde vira `unreachable` |
+| `NodeProbe` | Pergunta a UM nó `/chain/validate`, `/peers`, `/transactions/pending` e `/` (identidade, em cache por 30 s — revalida a cadeia inteira no nó) com timeout de 1,5 s | lançar exceção por causa do nó |
+| `StatusClassifier` | A regra única de status: cadeia líder = a válida mais longa; atrasado (o topo está na líder), fork (mesmo tamanho com outro topo, ou cadeia mais curta cujo topo não está na líder — a cadeia da líder é buscada só quando há atrasado), cadeia inválida, outra rede (genesis da minoria) | a UI só exibe — não há segunda versão da regra |
+| `LabService` | Laboratório sobre a rede inteira: partição em lote, remover falhas de todos, sincronizar todos (um nó de cada vez) | aplicar falha ela mesma — cada nó aplica a sua |
+| `NodeProxy` | Repassa transação, minerar e sync ao nó; status e corpo voltam **como o nó respondeu** | traduzir ou reinterpretar respostas (só fala por si no 502) |
+| `NodeLifecycle` | Regras de entrar/sair pelo console: próximo `nodeN`, semente = nó de pé na cadeia líder, **dificuldade copiada de um nó vivo**, sementes só param/religam | falar com o Docker |
+| `INodeRuntime` | A plataforma: `DockerNodeRuntime` (Engine API pelo socket Unix, sem pacote extra) ou `NullNodeRuntime` (sem Docker: só leitura e operações) | decidir quem pode ser removido |
+| `ui/` | React 19 + Vite + TypeScript, três abas: **Rede** (grafo SVG — tracejada = só um lista o outro, vermelha = lados diferentes da partição — e painel do nó), **Explorador da cadeia** (blocos encadeados com os zeros do PoW em destaque, comparação de dois nós com o ponto de fork, verificação do bloco pelo nó) e **Laboratório** (roteiro de fork guiado, partição, nó lento, bloco adulterado); registro de operações em português; TanStack Query com polling de 2 s | regras de negócio (comparar cadeias é só alinhar hashes) |
+
+### API do gateway
+
+| Rota | Função |
+|------|--------|
+| `GET /api/network` | Snapshot: cada nó com `state` (`running`/`unreachable`/`stopped`), `status` (`ok`/`behind`/`diverged`/`invalid`/`incompatible`/`unknown`), papel, cadeia, mempool, peers; resumo (`total`, `reachable`, `maxLength`, `converged`) |
+| `GET /api/capabilities` | `runtime` (`docker`/`none`), `canManageNodes`, links de Grafana/Jaeger/Prometheus |
+| `GET /api/nodes/{id}/chain[?last=N]` · `/pending` | A cadeia inteira (explorador) ou os últimos blocos; a mempool do nó |
+| `POST /api/nodes/{id}/blocks/inspect` · `/blocks/receive` | Repassados: o nó explica o que faria com o bloco · entrega o bloco como um peer |
+| `PUT /api/nodes/{id}/lab/partition` · `/lab/delay` · `DELETE /api/nodes/{id}/lab` | Falhas injetadas em um nó (repassadas) |
+| `PUT /api/lab/partition` · `DELETE /api/lab` · `POST /api/lab/sync-all` | Laboratório na rede inteira: `{"groups": {"node3": "B"}}` (quem não está no mapa sai da partição) · remover falhas de todos · `POST /sync` em cada nó, em ordem |
+| `POST /api/nodes/{id}/transactions` · `/mine` · `/sync` | Repassados ao nó (404 nó desconhecido · 409 nó parado · 502 sem resposta) |
+| `POST /api/nodes` | Cria um nó (`{ "name"?, "hostPort"? }`): **201** com nome, semente e dificuldade escolhidos · **501** sem Docker |
+| `POST /api/nodes/{id}/stop?mode=graceful\|crash` · `/start` · `DELETE /api/nodes/{id}` | Despedida (`docker stop`) × queda (`docker kill`), religar, remover (só nós dinâmicos) |
+
+### Docker e segurança
+
+- **Criar um nó** espelha o molde `node-extra` e o `add-node.ps1`: imagem e rede **copiadas de um
+  nó que já existe**, env `NODE_ID`/`ADVERTISE_URL`/`PEERS`/`DIFFICULTY` (+ OTLP se o Jaeger
+  estiver no ar), labels `com.docker.compose.project=satusblockchain`,
+  `service=node-extra`, `oneoff=True` — Prometheus e Alloy o enxergam sem configuração. Porta do
+  host: a próxima livre a partir de 8083.
+- **O socket do Docker dá poder de root na máquina.** Por isso o console mora num overlay próprio
+  (`docker-compose.console.yml`; o compose base não muda), é publicado só em `127.0.0.1:3001`,
+  só age sobre containers `nodeN` com a label do projeto e **não aceita imagem, comando ou volume
+  vindos da requisição**. Sem autenticação — escopo didático, máquina local.
+- A imagem do console (`src/SatusBlockchain.Gateway/Dockerfile`) tem três estágios: `node:24`
+  compila a UI, `sdk:10.0` publica o gateway, `aspnet:10.0` executa (como `root`, pelo socket).
+
+### Configuração do gateway
+
+| Variável | Padrão | Descrição |
+|----------|--------|-----------|
+| `RUNTIME` | `auto` | `docker` (exige o socket), `none` (sem Docker) ou `auto` (Docker se o socket existir) |
+| `GATEWAY_NODES` | — | URLs de nós conhecidos; basta um — os outros vêm das listas de peers |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Caminho do socket da Engine API |
+| `GRAFANA_URL` · `JAEGER_URL` · `PROMETHEUS_URL` | `http://localhost:3000` · `:16686` · `:9090` | Links do cabeçalho (vistos do navegador) |
+
+### Alternativas descartadas
+
+| Alternativa | Motivo do descarte |
+|-------------|--------------------|
+| Console chamando os nós direto do navegador | Exigiria CORS em cada nó e não funcionaria no Docker: `http://nodeN:8080` só resolve dentro da rede |
+| Eventos em tempo real (SSE/SignalR) no console | Mudaria a API dos nós e exigiria reconexão a cada queda; polling de 2 s com um snapshot agregado basta para a demo |
+| Biblioteca de grafos na UI (D3, Cytoscape) | Até 32 nós cabem num layout circular em SVG simples; uma dependência a menos para explicar |

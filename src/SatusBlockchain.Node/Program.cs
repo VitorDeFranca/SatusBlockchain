@@ -5,6 +5,7 @@ using OpenTelemetry.Trace;
 using SatusBlockchain.Node;
 using SatusBlockchain.Node.Api;
 using SatusBlockchain.Node.Core;
+using SatusBlockchain.Node.Lab;
 using SatusBlockchain.Node.Networking;
 using SatusBlockchain.Node.Observability;
 
@@ -22,10 +23,16 @@ builder.Services.AddSingleton<NodeTelemetry>();
 // Etapa 10: a lista VIVA de peers (sementes de PEERS + quem entra/sai em execução).
 builder.Services.AddSingleton<PeerRegistry>();
 
+// Etapa 12: falhas injetadas (partição simulada e lentidão) — só no tráfego entre nós.
+builder.Services.AddSingleton<LabState>();
+builder.Services.AddTransient<PeerHeadersHandler>();
+
 builder.Services.AddHttpClient<PeerClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(2);
-});
+})
+// Marca as requisições como "de peer" (e com o grupo de partição): é o que o laboratório filtra.
+.AddHttpMessageHandler<PeerHeadersHandler>();
 
 // O pull (etapa 8), compartilhado pelo POST /sync e pela entrada do nó na rede.
 builder.Services.AddTransient<ChainSynchronizer>();
@@ -72,6 +79,10 @@ var app = builder.Build();
 // Materializa a telemetria já na inicialização do nó.
 app.Services.GetRequiredService<NodeTelemetry>();
 
+// Laboratório (etapa 12): antes de qualquer endpoint, recusa peers de outra partição e atrasa
+// as respostas a peers quando o nó está "lento". Quem não é peer (console, curl) passa direto.
+app.UseMiddleware<PeerTrafficMiddleware>();
+
 // Identidade e situação do nó — útil para conferir a demo. É também o que o handshake da
 // etapa 10 lê (NodeIdentity): o genesis diz se um nó novo pertence a esta rede.
 app.MapGet("/", (NodeOptions node, Blockchain blockchain) => Results.Ok(new
@@ -88,6 +99,7 @@ app.MapTransactionEndpoints();
 app.MapBlockEndpoints();
 app.MapPeerEndpoints();
 app.MapSyncEndpoints();
+app.MapLabEndpoints();
 
 app.MapPrometheusScrapingEndpoint("/metrics");
 
